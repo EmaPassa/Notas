@@ -6,7 +6,8 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { Badge } from "@/components/ui/badge"
-import { Search, CheckCircle, XCircle, Loader2, List, Wifi } from "lucide-react"
+import { Search, CheckCircle, XCircle, Loader2, List, Wifi, GraduationCap, Upload } from "lucide-react"
+import CollegeHeader from "@/components/college-header"
 
 interface Grade {
   materia: string
@@ -34,8 +35,8 @@ export default function Component() {
 
   const getGradeColor = (nota: number | "Sin nota") => {
     if (nota === "Sin nota") return "bg-gray-100 text-gray-600"
-    if (nota >= 7) return "bg-green-100 text-green-800"
-    return "bg-red-100 text-red-800"
+    if (nota >= 7) return "bg-green-100 text-green-800 border-green-300"
+    return "bg-red-100 text-red-800 border-red-300"
   }
 
   const testConnection = async () => {
@@ -125,39 +126,65 @@ export default function Component() {
   }
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 p-4">
+    <div className="min-h-screen bg-gradient-to-br from-green-50 via-yellow-50 to-green-100 p-4">
       <div className="max-w-4xl mx-auto">
-        <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-gray-900 mb-2">Sistema de Consulta de Calificaciones</h1>
-          <p className="text-gray-600">Acceso directo a Google Drive - Sin Google Apps Script</p>
+        <CollegeHeader
+          title="Sistema de Consulta de Calificaciones"
+          subtitle="Acceso directo a Google Drive - Sin Google Apps Script"
+        />
+
+        {/* Alerta para versión local */}
+        <div className="mb-6 p-4 bg-gradient-to-r from-yellow-400 to-yellow-500 rounded-lg border border-yellow-600 shadow-lg">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <Upload className="w-6 h-6 text-gray-900" />
+              <div>
+                <span className="text-gray-900 font-semibold">💡 ¿Problemas de conexión?</span>
+                <p className="text-gray-800 text-sm mt-1">
+                  Prueba la versión local subiendo archivos Excel directamente
+                </p>
+              </div>
+            </div>
+            <a
+              href="/local"
+              className="bg-green-600 hover:bg-green-700 text-white px-6 py-3 rounded-lg font-medium transition-colors shadow-md hover:shadow-lg"
+            >
+              Usar Versión Local
+            </a>
+          </div>
         </div>
 
         {/* Indicador de conexión */}
-        <div className="mb-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
+        <div className="mb-6 p-4 bg-green-50 rounded-lg border border-green-200">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <Wifi className="w-4 h-4 text-blue-600" />
-              <p className="text-sm text-blue-800">
+              <Wifi className="w-5 h-5 text-green-600" />
+              <p className="text-sm text-green-800 font-medium">
                 Conexión directa a Google Drive API
-                {connectionStatus === "connected" && <span className="text-green-600 ml-2">✅ Conectado</span>}
+                {connectionStatus === "connected" && <span className="text-green-700 ml-2">✅ Conectado</span>}
                 {connectionStatus === "error" && <span className="text-red-600 ml-2">❌ Error de conexión</span>}
               </p>
             </div>
-            <Button variant="outline" size="sm" onClick={testConnection} className="text-xs bg-transparent">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={testConnection}
+              className="text-xs bg-white border-green-300 text-green-700 hover:bg-green-50"
+            >
               Probar Conexión
             </Button>
           </div>
         </div>
 
         {/* Formulario de búsqueda */}
-        <Card className="mb-8 shadow-lg">
-          <CardHeader>
+        <Card className="mb-8 shadow-lg border-green-200">
+          <CardHeader className="bg-gradient-to-r from-green-600 to-green-700 text-white rounded-t-lg">
             <CardTitle className="flex items-center gap-2">
               <Search className="w-5 h-5" />
               Buscar Calificaciones
             </CardTitle>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-6">
             <div className="flex flex-col sm:flex-row gap-4">
               <div className="flex-1">
                 <Input
@@ -165,11 +192,11 @@ export default function Component() {
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
                   onKeyPress={(e) => e.key === "Enter" && handleSearch()}
-                  className="h-12"
+                  className="h-12 border-green-300 focus:border-green-500 focus:ring-green-500"
                 />
               </div>
               <Select value={searchType} onValueChange={(value: "alumno" | "curso") => setSearchType(value)}>
-                <SelectTrigger className="w-full sm:w-40 h-12">
+                <SelectTrigger className="w-full sm:w-40 h-12 border-green-300 focus:border-green-500">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -180,7 +207,7 @@ export default function Component() {
               <Button
                 onClick={handleSearch}
                 disabled={loading || !searchQuery.trim()}
-                className="h-12 px-8 bg-blue-600 hover:bg-blue-700"
+                className="h-12 px-8 bg-green-600 hover:bg-green-700 text-white"
               >
                 {loading ? (
                   <>
@@ -197,7 +224,7 @@ export default function Component() {
             </div>
 
             {/* Filtros adicionales */}
-            <div className="mt-4 pt-4 border-t border-gray-200">
+            <div className="mt-4 pt-4 border-t border-green-200">
               <div className="flex flex-col sm:flex-row gap-4 items-start sm:items-center">
                 <label className="text-sm font-medium text-gray-700 whitespace-nowrap">Filtrar por:</label>
                 <div className="flex flex-wrap gap-3">
@@ -207,7 +234,7 @@ export default function Component() {
                       value={filterCuatrimestre}
                       onValueChange={(value: "todos" | "1º" | "2º" | "Final") => setFilterCuatrimestre(value)}
                     >
-                      <SelectTrigger className="w-32 h-9">
+                      <SelectTrigger className="w-32 h-9 border-green-300">
                         <SelectValue />
                       </SelectTrigger>
                       <SelectContent>
@@ -225,7 +252,7 @@ export default function Component() {
               {filterCuatrimestre !== "todos" && (
                 <div className="mt-3 flex flex-wrap gap-2">
                   <span className="text-xs text-gray-500">Filtros activos:</span>
-                  <Badge variant="secondary" className="text-xs">
+                  <Badge className="text-xs bg-yellow-400 text-gray-900 hover:bg-yellow-500">
                     Cuatrimestre: {filterCuatrimestre}
                     <button onClick={() => setFilterCuatrimestre("todos")} className="ml-1 hover:text-red-600">
                       ×
@@ -237,7 +264,7 @@ export default function Component() {
 
             {/* Botón para ver cursos disponibles */}
             {searchType === "curso" && (
-              <div className="mt-4 pt-4 border-t border-gray-200">
+              <div className="mt-4 pt-4 border-t border-green-200">
                 <Button
                   variant="outline"
                   onClick={() => {
@@ -247,7 +274,7 @@ export default function Component() {
                     setShowCourses(!showCourses)
                   }}
                   disabled={loadingCourses}
-                  className="w-full sm:w-auto"
+                  className="w-full sm:w-auto border-green-300 text-green-700 hover:bg-green-50"
                 >
                   {loadingCourses ? (
                     <>
@@ -264,8 +291,8 @@ export default function Component() {
 
                 {/* Lista de cursos disponibles */}
                 {showCourses && availableCourses.length > 0 && (
-                  <div className="mt-4 p-4 bg-blue-50 rounded-lg border border-blue-200">
-                    <h4 className="font-semibold text-blue-900 mb-3">Cursos Disponibles:</h4>
+                  <div className="mt-4 p-4 bg-green-50 rounded-lg border border-green-200">
+                    <h4 className="font-semibold text-green-900 mb-3">Cursos Disponibles:</h4>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                       {availableCourses.map((course, index) => (
                         <button
@@ -274,14 +301,14 @@ export default function Component() {
                             setSearchQuery(course.split(" - ")[0]) // Solo el código del curso
                             setShowCourses(false)
                           }}
-                          className="text-left p-2 rounded bg-white hover:bg-blue-100 border border-blue-200 transition-colors duration-200 text-sm"
+                          className="text-left p-3 rounded bg-white hover:bg-green-100 border border-green-300 transition-colors duration-200 text-sm"
                         >
-                          <span className="font-medium text-blue-800">{course.split(" - ")[0]}</span>
-                          <span className="text-blue-600 ml-2">{course.split(" - ")[1]}</span>
+                          <span className="font-medium text-green-800">{course.split(" - ")[0]}</span>
+                          <span className="text-green-600 ml-2">{course.split(" - ")[1]}</span>
                         </button>
                       ))}
                     </div>
-                    <p className="text-xs text-blue-600 mt-2">
+                    <p className="text-xs text-green-700 mt-2">
                       💡 Haz clic en cualquier curso para buscarlo automáticamente
                     </p>
                   </div>
@@ -295,9 +322,9 @@ export default function Component() {
         {hasSearched && (
           <div className="space-y-6">
             {results.length === 0 ? (
-              <Card className="shadow-lg">
+              <Card className="shadow-lg border-yellow-200">
                 <CardContent className="text-center py-12">
-                  <div className="text-gray-500 mb-2">
+                  <div className="text-yellow-500 mb-2">
                     <Search className="w-12 h-12 mx-auto mb-4 opacity-50" />
                   </div>
                   <h3 className="text-lg font-semibold text-gray-700 mb-2">No se encontraron resultados</h3>
@@ -311,29 +338,32 @@ export default function Component() {
                 const stats = calculateStats(student.calificaciones)
 
                 return (
-                  <Card key={index} className="shadow-lg">
-                    <CardHeader className="bg-gradient-to-r from-blue-600 to-indigo-600 text-white rounded-t-lg">
-                      <CardTitle className="text-xl">{student.nombre}</CardTitle>
+                  <Card key={index} className="shadow-lg border-green-200">
+                    <CardHeader className="bg-gradient-to-r from-green-600 to-green-700 text-white rounded-t-lg">
+                      <CardTitle className="text-xl flex items-center gap-3">
+                        <GraduationCap className="w-6 h-6" />
+                        {student.nombre}
+                      </CardTitle>
                     </CardHeader>
                     <CardContent className="p-6">
                       {/* Tabla de calificaciones */}
                       <div className="overflow-x-auto mb-6">
                         <Table>
                           <TableHeader>
-                            <TableRow>
-                              <TableHead className="font-semibold">Materia</TableHead>
-                              <TableHead className="font-semibold">Curso</TableHead>
-                              <TableHead className="font-semibold">Cuatrimestre</TableHead>
-                              <TableHead className="font-semibold text-center">Nota</TableHead>
+                            <TableRow className="border-green-200">
+                              <TableHead className="font-semibold text-green-800">Materia</TableHead>
+                              <TableHead className="font-semibold text-green-800">Curso</TableHead>
+                              <TableHead className="font-semibold text-green-800">Cuatrimestre</TableHead>
+                              <TableHead className="font-semibold text-green-800 text-center">Nota</TableHead>
                             </TableRow>
                           </TableHeader>
                           <TableBody>
                             {student.calificaciones.map((grade, gradeIndex) => (
-                              <TableRow key={gradeIndex} className="hover:bg-gray-50">
+                              <TableRow key={gradeIndex} className="hover:bg-green-50 border-green-100">
                                 <TableCell className="font-medium">{grade.materia}</TableCell>
                                 <TableCell>{grade.curso}</TableCell>
                                 <TableCell>
-                                  <Badge variant="outline" className="font-medium">
+                                  <Badge variant="outline" className="font-medium border-green-300 text-green-700">
                                     {grade.cuatrimestre}
                                   </Badge>
                                 </TableCell>
@@ -348,23 +378,23 @@ export default function Component() {
 
                       {/* Estadísticas */}
                       <div className="flex flex-wrap gap-4 justify-center">
-                        <div className="flex items-center gap-2 bg-green-50 px-4 py-2 rounded-lg border border-green-200">
+                        <div className="flex items-center gap-2 bg-green-50 px-4 py-3 rounded-lg border border-green-200">
                           <CheckCircle className="w-5 h-5 text-green-600" />
                           <span className="font-semibold text-green-800">{stats.approved} Aprobadas</span>
                         </div>
-                        <div className="flex items-center gap-2 bg-red-50 px-4 py-2 rounded-lg border border-red-200">
+                        <div className="flex items-center gap-2 bg-red-50 px-4 py-3 rounded-lg border border-red-200">
                           <XCircle className="w-5 h-5 text-red-600" />
                           <span className="font-semibold text-red-800">{stats.failed} Desaprobadas</span>
                         </div>
                         {stats.pending > 0 && (
-                          <div className="flex items-center gap-2 bg-yellow-50 px-4 py-2 rounded-lg border border-yellow-200">
+                          <div className="flex items-center gap-2 bg-yellow-50 px-4 py-3 rounded-lg border border-yellow-200">
                             <div className="w-5 h-5 rounded-full bg-yellow-500"></div>
                             <span className="font-semibold text-yellow-800">{stats.pending} Pendientes</span>
                           </div>
                         )}
                         {filterCuatrimestre !== "todos" && (
-                          <div className="flex items-center gap-2 bg-blue-50 px-4 py-2 rounded-lg border border-blue-200">
-                            <span className="font-semibold text-blue-800">Filtrado: {filterCuatrimestre}</span>
+                          <div className="flex items-center gap-2 bg-yellow-50 px-4 py-3 rounded-lg border border-yellow-200">
+                            <span className="font-semibold text-yellow-800">Filtrado: {filterCuatrimestre}</span>
                           </div>
                         )}
                       </div>
@@ -375,6 +405,14 @@ export default function Component() {
             )}
           </div>
         )}
+
+        {/* Footer institucional */}
+        <div className="mt-12 text-center py-6 border-t border-green-200">
+          <p className="text-sm text-gray-600">
+            Sistema desarrollado para <span className="font-semibold text-green-700">E.E.S.T. Nº 6 BANFIELD</span>
+          </p>
+          <p className="text-xs text-gray-500 mt-1">LOMAS DE ZAMORA</p>
+        </div>
       </div>
     </div>
   )
