@@ -46,6 +46,7 @@ export default function StudentGradesApp() {
   const [selectedGradeType, setSelectedGradeType] = useState<string>("final")
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string>("")
+  const [expandedEvaluationType, setExpandedEvaluationType] = useState<string | null>(null)
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFiles = event.target.files
@@ -717,6 +718,97 @@ export default function StudentGradesApp() {
     })
 
     exportToExcel(statsData, "Estadisticas_Estudiantes_Filtradas")
+  }
+
+  const exportSubjectDetails = (gradeTypeKey: string) => {
+    const gradeTypeLabel =
+      [
+        { key: "preliminar1", label: "1º Valoración Preliminar" },
+        { key: "cuatrimestre1", label: "1º Cuatrimestre" },
+        { key: "preliminar2", label: "2º Valoración Preliminar" },
+        { key: "cuatrimestre2", label: "2º Cuatrimestre" },
+        { key: "final", label: "Calificación Final" },
+      ].find((type) => type.key === gradeTypeKey)?.label || "Detalle de Evaluación"
+
+    const subjectStats = new Map<
+      string,
+      {
+        subject: string
+        course: string
+        total: number
+        passed: number
+        failed: number
+        teaCount: number
+        approvalRate: number
+      }
+    >()
+
+    filteredData.forEach((subject) => {
+      let subjectTotal = 0
+      let subjectPassed = 0
+      let subjectFailed = 0
+      let subjectTea = 0
+
+      subject.students.forEach((student) => {
+        if (!searchStudent || student.name.toLowerCase().includes(searchStudent.toLowerCase())) {
+          const gradeStr = student[gradeTypeKey as keyof StudentGrade].toString().trim().toUpperCase()
+          const grade = Number.parseFloat(gradeStr)
+
+          if (gradeTypeKey === "preliminar1" || gradeTypeKey === "preliminar2") {
+            if (gradeStr === "TEA") {
+              subjectTotal++
+              subjectPassed++
+              subjectTea++
+            } else if (gradeStr === "TEP" || gradeStr === "TED") {
+              subjectTotal++
+              subjectFailed++
+            } else if (!isNaN(grade) && grade > 0) {
+              subjectTotal++
+              if (grade >= 7) {
+                subjectPassed++
+              } else {
+                subjectFailed++
+              }
+            }
+          } else {
+            if (!isNaN(grade) && grade > 0) {
+              subjectTotal++
+              if (grade >= 7) {
+                subjectPassed++
+              } else {
+                subjectFailed++
+              }
+            }
+          }
+        }
+      })
+
+      if (subjectTotal > 0) {
+        subjectStats.set(subject.subject, {
+          subject: subject.subject,
+          course: subject.course,
+          total: subjectTotal,
+          passed: subjectPassed,
+          failed: subjectFailed,
+          teaCount: subjectTea,
+          approvalRate: (subjectPassed / subjectTotal) * 100,
+        })
+      }
+    })
+
+    const exportData = Array.from(subjectStats.values())
+      .sort((a, b) => b.approvalRate - a.approvalRate)
+      .map((stat) => ({
+        Materia: stat.subject,
+        Curso: stat.course,
+        "Total Evaluaciones": stat.total,
+        Aprobados: stat.passed,
+        Desaprobados: stat.failed,
+        ...(gradeTypeKey === "preliminar1" || gradeTypeKey === "preliminar2" ? { "TEA Count": stat.teaCount } : {}),
+        "Tasa de Aprobación (%)": stat.approvalRate.toFixed(1),
+      }))
+
+    exportToExcel(exportData, `Detalle_Materias_${gradeTypeLabel.replace(/\s+/g, "_")}`)
   }
 
   const filteredData = getFilteredData()
@@ -1467,6 +1559,10 @@ export default function StudentGradesApp() {
                       <CardDescription>
                         Estadísticas globales de aprobación por cada tipo de calificación
                         {(searchStudent || searchSubject || selectedCourse !== "all") && " (filtrado)"}
+                        <br />
+                        <span className="text-xs text-gray-500">
+                          Haz clic en una tarjeta para ver el detalle por materia
+                        </span>
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -1523,11 +1619,21 @@ export default function StudentGradesApp() {
                           })
 
                           const approvalRate = totalEvaluations > 0 ? (passedEvaluations / totalEvaluations) * 100 : 0
+                          const isExpanded = expandedEvaluationType === gradeType.key
 
                           return (
-                            <Card key={gradeType.key} className="border-gray-200">
+                            <Card
+                              key={gradeType.key}
+                              className={`border-gray-200 cursor-pointer transition-all duration-200 hover:shadow-md ${
+                                isExpanded ? "ring-2 ring-blue-500" : ""
+                              }`}
+                              onClick={() => setExpandedEvaluationType(isExpanded ? null : gradeType.key)}
+                            >
                               <CardHeader className="bg-gray-50 pb-3">
-                                <CardTitle className="text-gray-800 text-sm font-medium">{gradeType.label}</CardTitle>
+                                <CardTitle className="text-gray-800 text-sm font-medium flex items-center justify-between">
+                                  {gradeType.label}
+                                  <span className="text-xs text-gray-500">{isExpanded ? "▼" : "▶"}</span>
+                                </CardTitle>
                               </CardHeader>
                               <CardContent className="pt-3">
                                 <div className="space-y-3">
@@ -1570,6 +1676,161 @@ export default function StudentGradesApp() {
                       </div>
                     </CardContent>
                   </Card>
+
+                  {/* Detalle por materia - aparece abajo cuando se selecciona un tipo de evaluación */}
+                  {expandedEvaluationType && (
+                    <Card className="border-blue-200 bg-blue-50">
+                      <CardHeader className="bg-blue-100">
+                        <div className="flex justify-between items-center">
+                          {" "}
+                          {/* Added flex container */}
+                          <div>
+                            <CardTitle className="text-blue-800">
+                              Detalle por Materia -{" "}
+                              {
+                                [
+                                  { key: "preliminar1", label: "1º Valoración Preliminar" },
+                                  { key: "cuatrimestre1", label: "1º Cuatrimestre" },
+                                  { key: "preliminar2", label: "2º Valoración Preliminar" },
+                                  { key: "cuatrimestre2", label: "2º Cuatrimestre" },
+                                  { key: "final", label: "Calificación Final" },
+                                ].find((type) => type.key === expandedEvaluationType)?.label
+                              }
+                            </CardTitle>
+                            <CardDescription className="text-blue-700">
+                              Estadísticas detalladas por cada materia para este tipo de evaluación
+                            </CardDescription>
+                          </div>
+                          <Button
+                            onClick={() => exportSubjectDetails(expandedEvaluationType)}
+                            variant="outline"
+                            size="sm"
+                            className="border-blue-300 text-blue-700 hover:bg-blue-100 bg-transparent"
+                          >
+                            <Download className="h-4 w-4 mr-2" />
+                            Exportar Detalle
+                          </Button>
+                        </div>
+                      </CardHeader>
+                      <CardContent className="pt-6">
+                        <div className="space-y-3">
+                          {(() => {
+                            // Calcular estadísticas por materia para el tipo de evaluación seleccionado
+                            const subjectStats = new Map<
+                              string,
+                              {
+                                subject: string
+                                course: string
+                                total: number
+                                passed: number
+                                failed: number
+                                teaCount: number
+                                approvalRate: number
+                              }
+                            >()
+
+                            filteredData.forEach((subject) => {
+                              let subjectTotal = 0
+                              let subjectPassed = 0
+                              let subjectFailed = 0
+                              let subjectTea = 0
+
+                              subject.students.forEach((student) => {
+                                if (
+                                  !searchStudent ||
+                                  student.name.toLowerCase().includes(searchStudent.toLowerCase())
+                                ) {
+                                  const gradeStr = student[expandedEvaluationType as keyof StudentGrade]
+                                    .toString()
+                                    .trim()
+                                    .toUpperCase()
+                                  const grade = Number.parseFloat(gradeStr)
+
+                                  if (
+                                    expandedEvaluationType === "preliminar1" ||
+                                    expandedEvaluationType === "preliminar2"
+                                  ) {
+                                    if (gradeStr === "TEA") {
+                                      subjectTotal++
+                                      subjectPassed++
+                                      subjectTea++
+                                    } else if (gradeStr === "TEP" || gradeStr === "TED") {
+                                      subjectTotal++
+                                      subjectFailed++
+                                    } else if (!isNaN(grade) && grade > 0) {
+                                      subjectTotal++
+                                      if (grade >= 7) {
+                                        subjectPassed++
+                                      } else {
+                                        subjectFailed++
+                                      }
+                                    }
+                                  } else {
+                                    if (!isNaN(grade) && grade > 0) {
+                                      subjectTotal++
+                                      if (grade >= 7) {
+                                        subjectPassed++
+                                      } else {
+                                        subjectFailed++
+                                      }
+                                    }
+                                  }
+                                }
+                              })
+
+                              if (subjectTotal > 0) {
+                                subjectStats.set(subject.subject, {
+                                  subject: subject.subject,
+                                  course: subject.course,
+                                  total: subjectTotal,
+                                  passed: subjectPassed,
+                                  failed: subjectFailed,
+                                  teaCount: subjectTea,
+                                  approvalRate: (subjectPassed / subjectTotal) * 100,
+                                })
+                              }
+                            })
+
+                            return Array.from(subjectStats.values())
+                              .sort((a, b) => b.approvalRate - a.approvalRate)
+                              .map((stat, index) => (
+                                <div
+                                  key={index}
+                                  className="flex items-center justify-between p-4 bg-white rounded-lg border border-blue-200"
+                                >
+                                  <div className="flex-1">
+                                    <h4 className="font-medium text-gray-900">{stat.subject}</h4>
+                                    <p className="text-sm text-gray-600">
+                                      {stat.total} estudiantes total ({stat.course})
+                                    </p>
+                                  </div>
+
+                                  <div className="flex items-center space-x-6">
+                                    <div className="text-center">
+                                      <div className="text-lg font-bold text-green-600">{stat.passed}</div>
+                                      <div className="text-xs text-gray-600">Aprobados</div>
+                                      {stat.teaCount > 0 && (
+                                        <div className="text-xs text-green-500">({stat.teaCount} TEA)</div>
+                                      )}
+                                    </div>
+                                    <div className="text-center">
+                                      <div className="text-lg font-bold text-red-600">{stat.failed}</div>
+                                      <div className="text-xs text-gray-600">Desaprobados</div>
+                                    </div>
+                                    <div className="text-center min-w-[60px]">
+                                      <div className="text-lg font-bold text-purple-600">
+                                        {stat.approvalRate.toFixed(1)}%
+                                      </div>
+                                      <div className="text-xs text-gray-600">Aprobación</div>
+                                    </div>
+                                  </div>
+                                </div>
+                              ))
+                          })()}
+                        </div>
+                      </CardContent>
+                    </Card>
+                  )}
 
                   {/* Estadísticas por Curso */}
                   {getGroupedCourses()
