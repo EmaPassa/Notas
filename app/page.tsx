@@ -1,6 +1,6 @@
 "use client"
 
-import type React from "react"
+import React from "react"
 
 import { useState } from "react"
 import { Upload, Search, FileSpreadsheet, Users, BookOpen, TrendingUp, Download } from "lucide-react"
@@ -13,6 +13,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import * as XLSX from "xlsx"
 import { Button } from "@/components/ui/button"
+import { MultiSelect } from "@/components/multi-select"
 
 interface StudentGrade {
   name: string
@@ -35,7 +36,7 @@ interface Statistics {
   totalSubjects: number
   passedSubjects: number
   failedSubjects: number
-  averageGrade: number
+  averageGrade: number // This average is always based on 'final' grade
 }
 
 export default function StudentGradesApp() {
@@ -43,10 +44,40 @@ export default function StudentGradesApp() {
   const [searchStudent, setSearchStudent] = useState("")
   const [searchSubject, setSearchSubject] = useState("")
   const [selectedCourse, setSelectedCourse] = useState<string>("all")
-  const [selectedGradeType, setSelectedGradeType] = useState<string>("final")
+  const [selectedGradeTypes, setSelectedGradeTypes] = useState<string[]>(["final"])
+  const [minFailedSubjects, setMinFailedSubjects] = useState<number | string>("")
+  const [minFailedGradeType, setMinFailedGradeType] = useState<string>("final") // New state for grade type for min failed subjects
   const [loading, setLoading] = useState(false)
-  const [error, setError] = useState<string>("")
+  const [error, setError] = React.useState<string>("") // Changed to React.useState
+
   const [expandedEvaluationType, setExpandedEvaluationType] = useState<string | null>(null)
+
+  const gradeTypeOptions = [
+    { value: "preliminar1", label: "1º Valoración Preliminar" },
+    { value: "cuatrimestre1", label: "Calificación 1º Cuatrimestre" },
+    { value: "preliminar2", label: "2º Valoración Preliminar" },
+    { value: "cuatrimestre2", label: "Calificación 2º Cuatrimestre" },
+    { value: "final", label: "Calificación Final" },
+  ]
+
+  // Helper function to normalize strings (remove accents, convert to lowercase)
+  const normalizeString = (str: string): string => {
+    return str
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .toLowerCase()
+  }
+
+  // Helper function to determine if a subject should be excluded from display
+  const isExcludedSubject = (subjectName: string): boolean => {
+    const normalizedName = normalizeString(subjectName)
+    return (
+      normalizedName.includes("lenguajes tecnologicos") ||
+      normalizedName.includes("sistemas tecnologicos") ||
+      normalizedName.includes("procedimientos tecnicos")
+      // TALLER - General is now explicitly NOT excluded here
+    )
+  }
 
   const handleFileUpload = async (event: React.ChangeEvent<HTMLInputElement>) => {
     const uploadedFiles = event.target.files
@@ -63,19 +94,23 @@ export default function StudentGradesApp() {
         const data = await file.arrayBuffer()
         const workbook = XLSX.read(data, { type: "array" })
 
-        // Procesar cada hoja (materia)
         workbook.SheetNames.forEach((sheetName) => {
+          // IMPORTANT: If the sheet name is "TALLER - General", skip it.
+          // The calculated "TALLER - General" will be added later.
+          if (normalizeString(sheetName) === "taller - general") {
+            return // Skip this sheet
+          }
+
           const worksheet = workbook.Sheets[sheetName]
           const jsonData = XLSX.utils.sheet_to_json(worksheet, { header: 1, raw: false })
 
-          // Extraer información del curso (fila 7)
-          const courseInfo = jsonData[6] as string[] // Fila 7 (índice 6)
+          const courseInfo = jsonData[6] as string[]
           let year = "",
             section = ""
 
           if (courseInfo) {
-            const yearCell = courseInfo.find((cell, index) => typeof cell === "string" && cell.includes("AÑO:"))
-            const sectionCell = courseInfo.find((cell, index) => typeof cell === "string" && cell.includes("SECCIÓN:"))
+            const yearCell = courseInfo.find((cell) => typeof cell === "string" && cell.includes("AÑO:"))
+            const sectionCell = courseInfo.find((cell) => typeof cell === "string" && cell.includes("SECCIÓN:"))
 
             if (yearCell) year = yearCell.replace("AÑO:", "").trim()
             if (sectionCell) section = sectionCell.replace("SECCIÓN:", "").trim()
@@ -83,16 +118,13 @@ export default function StudentGradesApp() {
 
           const course = `${year} ${section}`.trim()
 
-          // Extraer datos de estudiantes (a partir de fila 10)
           const students: StudentGrade[] = []
 
           for (let row = 10; row < jsonData.length; row++) {
             const rowData = jsonData[row] as any[]
             if (rowData && rowData[1] && typeof rowData[1] === "string" && rowData[1].trim()) {
-              // Verificar que no sea una fila de encabezado o descripción
               const studentName = rowData[1].toString().trim()
 
-              // Lista de títulos que NO deben considerarse como estudiantes
               const excludedTitles = [
                 "TOTAL DE ESTUDIANTES",
                 "APROBADAS/OS",
@@ -104,7 +136,6 @@ export default function StudentGradesApp() {
                 "CALIFICACIÓN",
               ]
 
-              // Verificar que no sea una fila de encabezado, descripción o total
               const isValidStudentName =
                 studentName.length > 2 &&
                 !excludedTitles.some((title) => studentName.toUpperCase().includes(title.toUpperCase())) &&
@@ -114,11 +145,11 @@ export default function StudentGradesApp() {
               if (isValidStudentName) {
                 const student: StudentGrade = {
                   name: studentName,
-                  preliminar1: cleanGradeValue(rowData[8]), // Columna I
-                  cuatrimestre1: cleanGradeValue(rowData[9]), // Columna J
-                  preliminar2: cleanGradeValue(rowData[16]), // Columna Q
-                  cuatrimestre2: cleanGradeValue(rowData[17]), // Columna R
-                  final: cleanGradeValue(rowData[22]), // Columna W
+                  preliminar1: cleanGradeValue(rowData[8]),
+                  cuatrimestre1: cleanGradeValue(rowData[9]),
+                  preliminar2: cleanGradeValue(rowData[16]),
+                  cuatrimestre2: cleanGradeValue(rowData[17]),
+                  final: cleanGradeValue(rowData[22]),
                 }
 
                 students.push(student)
@@ -138,7 +169,10 @@ export default function StudentGradesApp() {
         })
       }
 
+      // Now, process workshop subjects from the filtered newFiles.
+      // This function will add the *calculated* TALLER - General.
       const processedFiles = processWorkshopSubjects(newFiles)
+
       setFiles((prev) => [...prev, ...processedFiles])
     } catch (err) {
       setError("Error al procesar los archivos Excel. Verifique el formato.")
@@ -148,124 +182,206 @@ export default function StudentGradesApp() {
     }
   }
 
-  const getFilteredData = () => {
-    let filtered = files
+  // Helper function to get subjects relevant to a student, applying global filters
+  // `ignoreSubjectFilter` is used when calculating minFailedSubjects to ensure all subjects are considered.
+  const getStudentSubjectsFiltered = (studentName: string, ignoreSubjectFilter = false) => {
+    return files
+      .filter((file) => {
+        // Check if student is in this subject
+        const studentInSubject = file.students.some(
+          (student) => student.name.toLowerCase().trim() === studentName.toLowerCase().trim(),
+        )
+        if (!studentInSubject) return false
 
-    if (selectedCourse !== "all") {
-      // Si el curso seleccionado es normalizado, filtrar por todos los cursos que se normalizan a ese valor
-      const groupedCourses = getGroupedCourses()
-      const selectedGroup = groupedCourses.find((group) => group.normalizedName === selectedCourse)
-
-      if (selectedGroup) {
-        filtered = filtered.filter((file) => Array.from(selectedGroup.originalNames).includes(file.course))
-      } else {
-        // Fallback para compatibilidad
-        filtered = filtered.filter((file) => file.course === selectedCourse)
-      }
-    }
-
-    if (searchStudent || searchSubject) {
-      filtered = filtered.filter((file) => {
-        const matchesStudent =
-          !searchStudent ||
-          file.students.some((student) => student.name.toLowerCase().includes(searchStudent.toLowerCase()))
-        const matchesSubject = !searchSubject || file.subject.toLowerCase().includes(searchSubject.toLowerCase())
-
-        // Si ambos campos tienen valores, ambos deben coincidir
-        if (searchStudent && searchSubject) {
-          return matchesStudent && matchesSubject
+        // Apply course filter
+        if (selectedCourse !== "all") {
+          const groupedCourses = getGroupedCourses()
+          const selectedGroup = groupedCourses.find((group) => group.normalizedName === selectedCourse)
+          if (!selectedGroup || !Array.from(selectedGroup.originalNames).includes(file.course)) {
+            return false
+          }
         }
-        // Si solo uno tiene valor, solo ese debe coincidir
-        return matchesStudent || matchesSubject
+
+        // Apply subject filter, but only if not ignoring it (e.g., for minFailedSubjects calculation)
+        if (searchSubject && !ignoreSubjectFilter) {
+          if (!normalizeString(file.subject).includes(normalizeString(searchSubject))) {
+            return false
+          }
+        }
+        return true
       })
-    }
-
-    return filtered
-  }
-
-  const getStudentSubjects = (studentName: string) => {
-    let studentFiles = files.filter((file) =>
-      file.students.some((student) => student.name.toLowerCase().trim() === studentName.toLowerCase().trim()),
-    )
-
-    // Aplicar filtro de curso si está seleccionado
-    if (selectedCourse !== "all") {
-      const groupedCourses = getGroupedCourses()
-      const selectedGroup = groupedCourses.find((group) => group.normalizedName === selectedCourse)
-
-      if (selectedGroup) {
-        studentFiles = studentFiles.filter((file) => Array.from(selectedGroup.originalNames).includes(file.course))
-      }
-    }
-
-    return studentFiles
       .map((subject) => {
+        // Attach student's specific data for convenience
         const student = subject.students.find((s) => s.name.toLowerCase().trim() === studentName.toLowerCase().trim())
         return {
           ...subject,
           studentData: student,
         }
       })
-      .filter((item) => item.studentData)
+  }
+
+  // Calculates overall statistics for a student based on a specific grade type for failed count.
+  // The average grade is always based on 'final' grade.
+  const getStudentOverallStatistics = (
+    studentSubjectsWithData: {
+      subject: string
+      course: string
+      year: string
+      section: string
+      studentData: StudentGrade | undefined
+    }[],
+    gradeTypeForFailedCount: keyof StudentGrade = "final",
+  ): Statistics => {
+    let totalSubjects = 0
+    let passedSubjects = 0
+    let failedSubjects = 0
+    let totalFinalGrades = 0
+    let finalGradeSum = 0
+
+    studentSubjectsWithData.forEach((item) => {
+      if (item.studentData) {
+        // Calculate failed/passed subjects based on gradeTypeForFailedCount
+        const gradeStr = item.studentData[gradeTypeForFailedCount].toString().trim().toUpperCase()
+        const grade = Number.parseFloat(gradeStr)
+
+        if (gradeTypeForFailedCount === "preliminar1" || gradeTypeForFailedCount === "preliminar2") {
+          if (gradeStr === "TEA") {
+            totalSubjects++
+            passedSubjects++
+          } else if (gradeStr === "TEP" || gradeStr === "TED") {
+            totalSubjects++
+            failedSubjects++
+          } else if (!isNaN(grade) && grade > 0) {
+            totalSubjects++
+            if (grade >= 7) {
+              passedSubjects++
+            } else {
+              failedSubjects++
+            }
+          }
+        } else {
+          if (!isNaN(grade) && grade > 0) {
+            totalSubjects++
+            if (grade >= 7) {
+              passedSubjects++
+            } else {
+              failedSubjects++
+            }
+          }
+        }
+
+        // Always calculate average based on final grade
+        const finalGrade = Number.parseFloat(item.studentData.final.toString())
+        if (!isNaN(finalGrade) && finalGrade > 0) {
+          totalFinalGrades++
+          finalGradeSum += finalGrade
+        }
+      }
+    })
+
+    return {
+      totalSubjects,
+      passedSubjects,
+      failedSubjects,
+      averageGrade: totalFinalGrades > 0 ? finalGradeSum / totalFinalGrades : 0,
+    }
+  }
+
+  const getFilteredData = () => {
+    return files.filter((file) => {
+      // 1. Filter by Course
+      if (selectedCourse !== "all") {
+        const groupedCourses = getGroupedCourses()
+        const selectedGroup = groupedCourses.find((group) => group.normalizedName === selectedCourse)
+        if (!selectedGroup || !Array.from(selectedGroup.originalNames).includes(file.course)) {
+          return false
+        }
+      }
+
+      // 2. Filter by Subject Name (only if minFailedSubjects is not active)
+      const isMinFailedActive = minFailedSubjects !== "" && Number(minFailedSubjects) > 0
+      const matchesSubject =
+        isMinFailedActive || !searchSubject || normalizeString(file.subject).includes(normalizeString(searchSubject))
+      if (!matchesSubject) {
+        return false
+      }
+
+      // 3. Filter by Student Name (if any student in this subject matches, only if minFailedSubjects is not active)
+      const matchesStudent =
+        isMinFailedActive ||
+        !searchStudent ||
+        file.students.some((student) => normalizeString(student.name).includes(normalizeString(searchStudent)))
+      if (!matchesStudent) {
+        return false
+      }
+
+      // 4. Exclude specific subjects from display in "Calificaciones" tab
+      // TALLER - General is now explicitly NOT excluded here
+      if (isExcludedSubject(file.subject)) {
+        return false
+      }
+
+      return true // All filters passed
+    })
   }
 
   const getFilteredStudents = () => {
     let students = getUniqueStudents()
 
-    // Filtrar por término de búsqueda de estudiante
-    if (searchStudent) {
-      students = students.filter((studentName) => studentName.toLowerCase().includes(searchStudent.toLowerCase()))
+    const isMinFailedActive = minFailedSubjects !== "" && Number(minFailedSubjects) > 0
+
+    // Apply searchStudent filter first, but only if minFailedSubjects is not active
+    if (searchStudent && !isMinFailedActive) {
+      students = students.filter((studentName) => normalizeString(studentName).includes(normalizeString(searchStudent)))
     }
 
-    // Filtrar por curso si está seleccionado - usar la nueva lógica de agrupamiento
-    if (selectedCourse !== "all") {
-      const groupedCourses = getGroupedCourses()
-      const selectedGroup = groupedCourses.find((group) => group.normalizedName === selectedCourse)
+    // Filter students based on whether they have any subjects matching the course/subject filters
+    // If minFailedSubjects is active, ignore searchSubject for this check
+    students = students.filter((studentName) => {
+      const studentSubjects = getStudentSubjectsFiltered(studentName, isMinFailedActive)
+      return studentSubjects.length > 0
+    })
 
-      if (selectedGroup) {
-        students = students.filter((studentName) => {
-          return Array.from(selectedGroup.originalNames).some((originalCourse) =>
-            files.some(
-              (file) =>
-                file.course === originalCourse &&
-                file.students.some((student) => student.name.toLowerCase().trim() === studentName.toLowerCase().trim()),
-            ),
-          )
-        })
-      }
-    }
-
-    // Filtrar por materia si está especificado
-    if (searchSubject) {
+    // Finally, apply the minFailedSubjects filter
+    if (isMinFailedActive) {
+      const min = Number(minFailedSubjects)
       students = students.filter((studentName) => {
-        return files.some(
-          (file) =>
-            file.subject.toLowerCase().includes(searchSubject.toLowerCase()) &&
-            file.students.some((student) => student.name.toLowerCase().trim() === studentName.toLowerCase().trim()),
-        )
+        // Pass true to ignore subject filter for this specific calculation
+        // This ensures ALL subjects for the student (within the course filter) are considered for failed count
+        const studentSubjects = getStudentSubjectsFiltered(studentName, true)
+        // Pass the selected minFailedGradeType to getStudentOverallStatistics
+        const stats = getStudentOverallStatistics(studentSubjects, minFailedGradeType as keyof StudentGrade)
+        return stats.failedSubjects >= min
       })
     }
 
-    // Asegurar que cada estudiante tenga al menos una materia con los filtros aplicados
-    return students.filter((studentName) => {
-      const studentSubjects = getStudentSubjects(studentName)
-      return studentSubjects.length > 0
-    })
+    return students
   }
 
   const getFilteredCourses = () => {
     const groupedCourses = getGroupedCourses()
+    const isMinFailedActive = minFailedSubjects !== "" && Number(minFailedSubjects) > 0
 
-    if (searchStudent || searchSubject) {
+    if (searchStudent || searchSubject || isMinFailedActive) {
       return groupedCourses
         .filter((group) => {
           return group.subjects.some((file) => {
+            // If minFailedActive, student and subject filters are ignored for the initial data filtering
             const matchesStudent =
+              isMinFailedActive ||
               !searchStudent ||
-              file.students.some((student) => student.name.toLowerCase().includes(searchStudent.toLowerCase()))
-            const matchesSubject = !searchSubject || file.subject.toLowerCase().includes(searchSubject.toLowerCase())
+              file.students.some((student) => normalizeString(student.name).includes(normalizeString(searchStudent)))
+            const matchesSubject =
+              isMinFailedActive ||
+              !searchSubject ||
+              normalizeString(file.subject).includes(normalizeString(searchSubject))
 
-            if (searchStudent && searchSubject) {
+            if (isMinFailedActive) {
+              // If minFailed is active, we only care if the course has any students that *could* be filtered later
+              // and if the subject matches the course filter.
+              // The student/subject search inputs are ignored for the initial data set.
+              return true // All subjects in the course are potentially relevant
+            } else if (searchStudent && searchSubject) {
               return matchesStudent && matchesSubject
             }
             return matchesStudent || matchesSubject
@@ -275,41 +391,6 @@ export default function StudentGradesApp() {
     }
 
     return groupedCourses.map((group) => group.normalizedName)
-  }
-
-  const getStudentStatistics = (studentName: string): Statistics => {
-    const studentSubjects = files.filter((file) =>
-      file.students.some((student) => student.name.toLowerCase().includes(studentName.toLowerCase())),
-    )
-
-    let totalSubjects = 0
-    let passedSubjects = 0
-    let totalGrades = 0
-    let gradeSum = 0
-
-    studentSubjects.forEach((subject) => {
-      const student = subject.students.find((s) => s.name.toLowerCase().includes(studentName.toLowerCase()))
-
-      if (student) {
-        const finalGrade = Number.parseFloat(student.final.toString())
-        if (!isNaN(finalGrade)) {
-          totalSubjects++
-          totalGrades++
-          gradeSum += finalGrade
-
-          if (finalGrade >= 7) {
-            passedSubjects++
-          }
-        }
-      }
-    })
-
-    return {
-      totalSubjects,
-      passedSubjects,
-      failedSubjects: totalSubjects - passedSubjects,
-      averageGrade: totalGrades > 0 ? gradeSum / totalGrades : 0,
-    }
   }
 
   const getUniqueStudents = () => {
@@ -346,20 +427,7 @@ export default function StudentGradesApp() {
   }
 
   const getGradeTypeLabel = (type: string) => {
-    switch (type) {
-      case "preliminar1":
-        return "1º Valoración Preliminar"
-      case "cuatrimestre1":
-        return "Calificación 1º Cuatrimestre"
-      case "preliminar2":
-        return "2º Valoración Preliminar"
-      case "cuatrimestre2":
-        return "Calificación 2º Cuatrimestre"
-      case "final":
-        return "Calificación Final"
-      default:
-        return "Calificación Final"
-    }
+    return gradeTypeOptions.find((option) => option.value === type)?.label || type
   }
 
   const cleanGradeValue = (value: any): string | number => {
@@ -367,18 +435,15 @@ export default function StudentGradesApp() {
 
     const strValue = value.toString().trim()
 
-    // Si contiene texto descriptivo largo, devolver vacío
     if (strValue.length > 10 && strValue.toLowerCase().includes("valoración")) {
       return ""
     }
 
-    // Si es un número, devolverlo
     const numValue = Number.parseFloat(strValue)
     if (!isNaN(numValue)) {
       return numValue
     }
 
-    // Si es TEA u otra calificación especial corta, devolverla
     if (strValue.length <= 5) {
       return strValue.toUpperCase()
     }
@@ -391,7 +456,6 @@ export default function StudentGradesApp() {
 
     const cleanCourse = course.trim().toUpperCase()
 
-    // Extraer año y sección usando regex
     const match = cleanCourse.match(/(\d+).*?(\d+)/)
 
     if (match) {
@@ -400,7 +464,6 @@ export default function StudentGradesApp() {
       return `${year}° ${section}`
     }
 
-    // Si no coincide con el patrón esperado, devolver el curso original limpio
     return cleanCourse
   }
 
@@ -431,7 +494,6 @@ export default function StudentGradesApp() {
     })
 
     return Array.from(courseGroups.values()).sort((a, b) => {
-      // Ordenar por año y luego por sección
       const aMatch = a.normalizedName.match(/(\d+)° (\d+)/)
       const bMatch = b.normalizedName.match(/(\d+)° (\d+)/)
 
@@ -440,8 +502,8 @@ export default function StudentGradesApp() {
         const bYear = Number.parseInt(bMatch[1])
         if (aYear !== bYear) return aYear - bYear
 
-        const aSection = Number.parseInt(aMatch[2])
-        const bSection = Number.parseInt(bMatch[2])
+        const aSection = Number.parseInt(bMatch[2])
+        const bSection = Number.parseInt(aMatch[2])
         return aSection - bSection
       }
 
@@ -452,7 +514,6 @@ export default function StudentGradesApp() {
   const processWorkshopSubjects = (files: SubjectData[]): SubjectData[] => {
     const processedFiles = [...files]
 
-    // Agrupar por curso
     const courseGroups = new Map<string, SubjectData[]>()
 
     processedFiles.forEach((file) => {
@@ -463,21 +524,18 @@ export default function StudentGradesApp() {
       courseGroups.get(course)!.push(file)
     })
 
-    // Procesar cada curso
     courseGroups.forEach((subjects, course) => {
-      // Buscar materias de taller
       const workshopSubjects = subjects.filter((subject) => {
-        const subjectName = subject.subject.toLowerCase()
+        const normalizedSubjectName = normalizeString(subject.subject)
         return (
-          subjectName.includes("lenguajes tecnológicos") ||
-          subjectName.includes("sistemas tecnológicos") ||
-          subjectName.includes("procedimientos técnicos")
+          normalizedSubjectName.includes("lenguajes tecnologicos") ||
+          normalizedSubjectName.includes("sistemas tecnologicos") ||
+          normalizedSubjectName.includes("procedimientos tecnicos")
         )
       })
 
       if (workshopSubjects.length === 0) return
 
-      // Obtener todos los estudiantes únicos de las materias de taller
       const allStudents = new Set<string>()
       workshopSubjects.forEach((subject) => {
         subject.students.forEach((student) => {
@@ -485,7 +543,6 @@ export default function StudentGradesApp() {
         })
       })
 
-      // Crear estudiantes para TALLER - General
       const tallerStudents: StudentGrade[] = []
 
       allStudents.forEach((studentName) => {
@@ -497,7 +554,6 @@ export default function StudentGradesApp() {
 
         if (studentWorkshopGrades.length === 0) return
 
-        // Calcular promedio 1º Cuatrimestre
         const cuatrimestre1Grades = studentWorkshopGrades
           .map((student) => {
             const grade = Number.parseFloat(student!.cuatrimestre1.toString())
@@ -505,7 +561,6 @@ export default function StudentGradesApp() {
           })
           .filter((grade) => grade !== null && grade > 0) as number[]
 
-        // Calcular promedio 2º Cuatrimestre
         const cuatrimestre2Grades = studentWorkshopGrades
           .map((student) => {
             const grade = Number.parseFloat(student!.cuatrimestre2.toString())
@@ -513,7 +568,6 @@ export default function StudentGradesApp() {
           })
           .filter((grade) => grade !== null && grade > 0) as number[]
 
-        // Función para redondear según la regla especificada
         const customRound = (num: number): number => {
           const decimal = num - Math.floor(num)
           if (decimal >= 0.5) {
@@ -523,7 +577,6 @@ export default function StudentGradesApp() {
           }
         }
 
-        // Calcular promedios
         let cuatrimestre1Average = ""
         let cuatrimestre2Average = ""
 
@@ -537,16 +590,13 @@ export default function StudentGradesApp() {
           cuatrimestre2Average = customRound(avg).toString()
         }
 
-        // Calcular calificación final (promedio de los dos cuatrimestres de TALLER)
         let finalGrade = ""
         if (cuatrimestre1Average && cuatrimestre2Average) {
           const avg = (Number.parseFloat(cuatrimestre1Average) + Number.parseFloat(cuatrimestre2Average)) / 2
           finalGrade = customRound(avg).toString()
         } else if (cuatrimestre1Average && !cuatrimestre2Average) {
-          // Si solo hay 1º cuatrimestre, usar esa nota como final
           finalGrade = cuatrimestre1Average
         } else if (!cuatrimestre1Average && cuatrimestre2Average) {
-          // Si solo hay 2º cuatrimestre, usar esa nota como final
           finalGrade = cuatrimestre2Average
         }
 
@@ -560,11 +610,10 @@ export default function StudentGradesApp() {
         })
       })
 
-      // Agregar la materia TALLER - General si hay estudiantes
       if (tallerStudents.length > 0) {
         processedFiles.push({
           subject: "TALLER - General",
-          course: course,
+          course: subjects[0]?.course || course,
           year: subjects[0]?.year || "",
           section: subjects[0]?.section || "",
           students: tallerStudents,
@@ -581,7 +630,6 @@ export default function StudentGradesApp() {
       const wb = XLSX.utils.book_new()
       XLSX.utils.book_append_sheet(wb, ws, "Datos")
 
-      // Use the browser-compatible writeFile method
       XLSX.writeFile(wb, `${filename}.xlsx`)
     } catch (error) {
       console.error("Error al exportar:", error)
@@ -590,29 +638,37 @@ export default function StudentGradesApp() {
   }
 
   const exportStudentData = (studentName: string) => {
-    const studentSubjects = getStudentSubjects(studentName)
-    const exportData = studentSubjects.map((item) => ({
-      Estudiante: studentName,
-      Materia: item.subject,
-      Curso: item.course,
-      "1º Val. Preliminar": item.studentData?.preliminar1 || "",
-      "1º Cuatrimestre": item.studentData?.cuatrimestre1 || "",
-      "2º Val. Preliminar": item.studentData?.preliminar2 || "",
-      "2º Cuatrimestre": item.studentData?.cuatrimestre2 || "",
-      "Calificación Final": item.studentData?.final || "",
-    }))
+    // When exporting individual student data, we should respect the current searchSubject filter
+    const studentSubjects = getStudentSubjectsFiltered(studentName, false)
+    const exportData = studentSubjects
+      .filter((item) => !isExcludedSubject(item.subject)) // Exclude original subjects from export
+      .map((item) => ({
+        Estudiante: studentName,
+        Materia: item.subject,
+        Curso: item.course,
+        "1º Val. Preliminar": item.studentData?.preliminar1 || "",
+        "1º Cuatrimestre": item.studentData?.cuatrimestre1 || "",
+        "2º Val. Preliminar": item.studentData?.preliminar2 || "",
+        "2º Cuatrimestre": item.studentData?.cuatrimestre2 || "",
+        "Calificación Final": item.studentData?.final || "",
+      }))
 
     exportToExcel(exportData, `Calificaciones_${studentName.replace(/\s+/g, "_")}`)
   }
 
   const exportAllGrades = () => {
-    const filteredFiles = getFilteredData()
+    const filteredFiles = getFilteredData() // getFilteredData already excludes subjects
     const allData: any[] = []
 
     filteredFiles.forEach((subject) => {
       subject.students.forEach((student) => {
-        // Solo incluir si el estudiante coincide con la búsqueda
-        if (!searchStudent || student.name.toLowerCase().includes(searchStudent.toLowerCase())) {
+        // This check is redundant if getFilteredData already handles searchStudent, but kept for safety
+        const isMinFailedActive = minFailedSubjects !== "" && Number(minFailedSubjects) > 0
+        if (
+          isMinFailedActive ||
+          !searchStudent ||
+          normalizeString(student.name).includes(normalizeString(searchStudent))
+        ) {
           allData.push({
             Estudiante: student.name,
             Materia: subject.subject,
@@ -631,11 +687,13 @@ export default function StudentGradesApp() {
   }
 
   const exportStatistics = () => {
-    const filteredStudents = getFilteredStudents()
+    const filteredStudentsForExport = getFilteredStudents() // This already applies all filters including minFailedSubjects
     const statsData: any[] = []
 
-    filteredStudents.forEach((studentName) => {
-      const studentSubjects = getStudentSubjects(studentName)
+    filteredStudentsForExport.forEach((studentName) => {
+      // For statistics export, we need to calculate stats for ALL grade types,
+      // so we pass false to ignoreSubjectFilter and iterate through all grade types.
+      const studentSubjectsForAllGrades = getStudentSubjectsFiltered(studentName, false)
 
       const calculateStatsForGradeType = (gradeType: keyof StudentGrade) => {
         let totalSubjects = 0
@@ -644,12 +702,12 @@ export default function StudentGradesApp() {
         let totalGrades = 0
         let gradeSum = 0
 
-        studentSubjects.forEach((item) => {
+        studentSubjectsForAllGrades.forEach((item) => {
+          // Do NOT exclude subjects here, as we need all data for overall stats
           if (item.studentData) {
             const gradeStr = item.studentData[gradeType].toString().trim().toUpperCase()
             const grade = Number.parseFloat(gradeStr)
 
-            // Para valoraciones preliminares
             if (gradeType === "preliminar1" || gradeType === "preliminar2") {
               if (gradeStr === "TEA") {
                 totalSubjects++
@@ -668,7 +726,6 @@ export default function StudentGradesApp() {
                 }
               }
             } else {
-              // Para cuatrimestres y final, solo números
               if (!isNaN(grade) && grade > 0) {
                 totalSubjects++
                 totalGrades++
@@ -720,16 +777,39 @@ export default function StudentGradesApp() {
     exportToExcel(statsData, "Estadisticas_Estudiantes_Filtradas")
   }
 
-  const exportSubjectDetails = (gradeTypeKey: string) => {
-    const gradeTypeLabel =
-      [
-        { key: "preliminar1", label: "1º Valoración Preliminar" },
-        { key: "cuatrimestre1", label: "1º Cuatrimestre" },
-        { key: "preliminar2", label: "2º Valoración Preliminar" },
-        { key: "cuatrimestre2", label: "2º Cuatrimestre" },
-        { key: "final", label: "Calificación Final" },
-      ].find((type) => type.key === gradeTypeKey)?.label || "Detalle de Evaluación"
+  const exportStudentsWithFailedSubjects = () => {
+    if (minFailedSubjects === "" || isNaN(Number(minFailedSubjects))) {
+      alert("Por favor, ingrese un número válido para el mínimo de materias desaprobadas.")
+      return
+    }
+    const min = Number(minFailedSubjects)
+    const studentsToExport = filteredStudents.filter((studentName) => {
+      // For this export, we need to calculate stats based on the selected minFailedGradeType
+      // and ignore the searchSubject filter.
+      const studentSubjects = getStudentSubjectsFiltered(studentName, true)
+      const stats = getStudentOverallStatistics(studentSubjects, minFailedGradeType as keyof StudentGrade)
+      return stats.failedSubjects >= min
+    })
 
+    const exportData = studentsToExport.map((studentName) => {
+      const studentSubjects = getStudentSubjectsFiltered(studentName, true) // Ensure all subjects are considered
+      const stats = getStudentOverallStatistics(studentSubjects, minFailedGradeType as keyof StudentGrade)
+      return {
+        Estudiante: studentName,
+        [`Materias Desaprobadas (${getGradeTypeLabel(minFailedGradeType)})`]: stats.failedSubjects,
+        [`Total Materias Evaluadas (${getGradeTypeLabel(minFailedGradeType)})`]: stats.totalSubjects,
+        "Promedio Final (General)": stats.averageGrade.toFixed(1), // Average is always final
+        Cursos: Array.from(new Set(studentSubjects.map((s) => s.course))).join(", "),
+      }
+    })
+
+    exportToExcel(
+      exportData,
+      `Alumnos_con_${min}_o_mas_desaprobadas_en_${getGradeTypeLabel(minFailedGradeType).replace(/\s+/g, "_")}`,
+    )
+  }
+
+  const exportSubjectDetails = (evaluationType: string) => {
     const subjectStats = new Map<
       string,
       {
@@ -743,41 +823,44 @@ export default function StudentGradesApp() {
       }
     >()
 
+    // Use filteredData which already excludes the specified subjects
     filteredData.forEach((subject) => {
       let subjectTotal = 0
       let subjectPassed = 0
       let subjectFailed = 0
-      let subjectTea = 0
+      let teaCount = 0
 
       subject.students.forEach((student) => {
-        if (!searchStudent || student.name.toLowerCase().includes(searchStudent.toLowerCase())) {
-          const gradeStr = student[gradeTypeKey as keyof StudentGrade].toString().trim().toUpperCase()
-          const grade = Number.parseFloat(gradeStr)
+        // Only consider students that pass the current filters
+        const studentPassesFilters = filteredStudents.includes(student.name)
+        if (!studentPassesFilters) return
 
-          if (gradeTypeKey === "preliminar1" || gradeTypeKey === "preliminar2") {
-            if (gradeStr === "TEA") {
-              subjectTotal++
+        const gradeStr = student[evaluationType as keyof StudentGrade].toString().trim().toUpperCase()
+        const grade = Number.parseFloat(gradeStr)
+
+        if (evaluationType === "preliminar1" || evaluationType === "preliminar2") {
+          if (gradeStr === "TEA") {
+            subjectTotal++
+            subjectPassed++
+            teaCount++
+          } else if (gradeStr === "TEP" || gradeStr === "TED") {
+            subjectTotal++
+            subjectFailed++
+          } else if (!isNaN(grade) && grade > 0) {
+            subjectTotal++
+            if (grade >= 7) {
               subjectPassed++
-              subjectTea++
-            } else if (gradeStr === "TEP" || gradeStr === "TED") {
-              subjectTotal++
+            } else {
               subjectFailed++
-            } else if (!isNaN(grade) && grade > 0) {
-              subjectTotal++
-              if (grade >= 7) {
-                subjectPassed++
-              } else {
-                subjectFailed++
-              }
             }
-          } else {
-            if (!isNaN(grade) && grade > 0) {
-              subjectTotal++
-              if (grade >= 7) {
-                subjectPassed++
-              } else {
-                subjectFailed++
-              }
+          }
+        } else {
+          if (!isNaN(grade) && grade > 0) {
+            subjectTotal++
+            if (grade >= 7) {
+              subjectPassed++
+            } else {
+              subjectFailed++
             }
           }
         }
@@ -790,26 +873,111 @@ export default function StudentGradesApp() {
           total: subjectTotal,
           passed: subjectPassed,
           failed: subjectFailed,
-          teaCount: subjectTea,
+          teaCount: teaCount,
           approvalRate: (subjectPassed / subjectTotal) * 100,
         })
       }
     })
 
-    const exportData = Array.from(subjectStats.values())
-      .sort((a, b) => b.approvalRate - a.approvalRate)
-      .map((stat) => ({
-        Materia: stat.subject,
-        Curso: stat.course,
-        "Total Evaluaciones": stat.total,
-        Aprobados: stat.passed,
-        Desaprobados: stat.failed,
-        ...(gradeTypeKey === "preliminar1" || gradeTypeKey === "preliminar2" ? { "TEA Count": stat.teaCount } : {}),
-        "Tasa de Aprobación (%)": stat.approvalRate.toFixed(1),
-      }))
+    const exportData = Array.from(subjectStats.values()).map((stat) => ({
+      Materia: stat.subject,
+      Curso: stat.course,
+      Total: stat.total,
+      Aprobados: stat.passed,
+      Desaprobados: stat.failed,
+      TEA: stat.teaCount,
+      "Tasa de Aprobación": stat.approvalRate.toFixed(1) + "%",
+    }))
 
-    exportToExcel(exportData, `Detalle_Materias_${gradeTypeLabel.replace(/\s+/g, "_")}`)
+    exportToExcel(exportData, `Detalle_Materias_${evaluationType}`)
   }
+
+  const exportSubjectMatrix = (evaluationType: string) => {
+    // Get all unique students from filtered data
+    const allStudents = new Set<string>()
+    filteredData.forEach((subject) => {
+      subject.students.forEach((student) => {
+        if (filteredStudents.includes(student.name)) {
+          allStudents.add(student.name)
+        }
+      })
+    })
+
+    // Get all unique subjects from filtered data
+    const allSubjects = filteredData.map((subject) => subject.subject)
+
+    // Create matrix data
+    const matrixData: any[] = []
+
+    Array.from(allStudents)
+      .sort()
+      .forEach((studentName) => {
+        const studentRow: any = {
+          Estudiante: studentName,
+        }
+
+        // For each subject, find the student's grade
+        allSubjects.forEach((subjectName) => {
+          const subjectData = filteredData.find((s) => s.subject === subjectName)
+          const studentData = subjectData?.students.find((s) => s.name === studentName)
+
+          if (studentData) {
+            const gradeStr = studentData[evaluationType as keyof StudentGrade].toString().trim().toUpperCase()
+            const grade = Number.parseFloat(gradeStr)
+
+            // Determine status for coloring
+            let status = "N/A"
+            if (evaluationType === "preliminar1" || evaluationType === "preliminar2") {
+              if (gradeStr === "TEA" || (!isNaN(grade) && grade >= 7)) {
+                status = "APROBADO"
+              } else if (gradeStr === "TEP" || gradeStr === "TED" || (!isNaN(grade) && grade < 7 && grade > 0)) {
+                status = "DESAPROBADO"
+              }
+            } else {
+              if (!isNaN(grade) && grade > 0) {
+                if (grade >= 7) {
+                  status = "APROBADO"
+                } else {
+                  status = "DESAPROBADO"
+                }
+              }
+            }
+
+            studentRow[subjectName] = `${gradeStr || "N/A"} (${status})`
+          } else {
+            studentRow[subjectName] = "N/A (N/A)"
+          }
+        })
+
+        matrixData.push(studentRow)
+      })
+
+    // Create workbook with conditional formatting
+    const ws = XLSX.utils.json_to_sheet(matrixData)
+    const wb = XLSX.utils.book_new()
+
+    // Apply conditional formatting (note: this is basic, Excel will need manual formatting for colors)
+    const range = XLSX.utils.decode_range(ws["!ref"] || "A1")
+
+    // Add a note about formatting in the first row
+    const headerRow: any = { Estudiante: "NOTA: Verde = Aprobado (TEA o ≥7), Amarillo = Desaprobado (TEP/TED o <7)" }
+    allSubjects.forEach((subject) => {
+      headerRow[subject] = "Formato: Nota (Estado)"
+    })
+
+    // Insert header row
+    XLSX.utils.sheet_add_json(ws, [headerRow], { origin: "A1" })
+    XLSX.utils.sheet_add_json(ws, matrixData, { origin: "A2", skipHeader: true })
+
+    XLSX.utils.book_append_sheet(wb, ws, "Matriz_Calificaciones")
+
+    XLSX.writeFile(
+      wb,
+      `Matriz_Calificaciones_${evaluationType}_${getGradeTypeLabel(evaluationType).replace(/\s+/g, "_")}.xlsx`,
+    )
+  }
+
+  const isMinFailedFilterActive = minFailedSubjects !== "" && Number(minFailedSubjects) > 0
 
   const filteredData = getFilteredData()
   const filteredStudents = getFilteredStudents()
@@ -836,7 +1004,7 @@ export default function StudentGradesApp() {
               <Badge variant="outline" className="bg-green-100 text-green-800">
                 {files.length} materias cargadas
               </Badge>
-              {(searchStudent || searchSubject || selectedCourse !== "all") && (
+              {(searchStudent || searchSubject || selectedCourse !== "all" || minFailedSubjects !== "") && (
                 <Badge variant="outline" className="bg-blue-100 text-blue-800">
                   {filteredData.length} materias filtradas
                 </Badge>
@@ -926,6 +1094,7 @@ export default function StudentGradesApp() {
                       value={searchStudent}
                       onChange={(e) => setSearchStudent(e.target.value)}
                       className="border-green-300 focus:border-green-500"
+                      disabled={isMinFailedFilterActive}
                     />
                   </div>
                   <div>
@@ -935,6 +1104,7 @@ export default function StudentGradesApp() {
                       value={searchSubject}
                       onChange={(e) => setSearchSubject(e.target.value)}
                       className="border-green-300 focus:border-green-500"
+                      disabled={isMinFailedFilterActive}
                     />
                   </div>
                   <div>
@@ -955,27 +1125,64 @@ export default function StudentGradesApp() {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-green-700 mb-2">Tipo de calificación</label>
-                    <Select value={selectedGradeType} onValueChange={setSelectedGradeType}>
-                      <SelectTrigger className="border-green-300 focus:border-green-500">
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="preliminar1">1º Valoración Preliminar</SelectItem>
-                        <SelectItem value="cuatrimestre1">Calificación 1º Cuatrimestre</SelectItem>
-                        <SelectItem value="preliminar2">2º Valoración Preliminar</SelectItem>
-                        <SelectItem value="cuatrimestre2">Calificación 2º Cuatrimestre</SelectItem>
-                        <SelectItem value="final">Calificación Final</SelectItem>
-                      </SelectContent>
-                    </Select>
+                    <MultiSelect
+                      options={gradeTypeOptions}
+                      selected={selectedGradeTypes}
+                      onValueChange={setSelectedGradeTypes}
+                      placeholder="Seleccionar tipos de calificación"
+                      className="border-green-300 focus:border-green-500"
+                    />
+                  </div>
+                  <div className="col-span-full md:col-span-2 grid grid-cols-2 gap-4">
+                    <div>
+                      <label className="block text-sm font-medium text-green-700 mb-2">
+                        Mín. materias desaprobadas
+                      </label>
+                      <Input
+                        type="number"
+                        placeholder="Ej: 3"
+                        value={minFailedSubjects}
+                        onChange={(e) => setMinFailedSubjects(e.target.value)}
+                        className="border-green-300 focus:border-green-500"
+                      />
+                      <p className="text-xs text-gray-500 mt-1">
+                        {"Muestra alumnos con este número o más materias desaprobadas."}
+                      </p>
+                    </div>
+                    <div>
+                      <label className="block text-sm font-medium text-green-700 mb-2">Tipo de valoración</label>
+                      <Select value={minFailedGradeType} onValueChange={setMinFailedGradeType}>
+                        <SelectTrigger className="border-green-300 focus:border-green-500">
+                          <SelectValue placeholder="Seleccionar tipo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {gradeTypeOptions.map((option) => (
+                            <SelectItem key={option.value} value={option.value}>
+                              {option.label}
+                            </SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-gray-500 mt-1">
+                        {"Tipo de calificación para el conteo de desaprobadas."}
+                      </p>
+                    </div>
                   </div>
                 </div>
-                {(searchStudent || searchSubject || selectedCourse !== "all") && (
+                {(searchStudent || searchSubject || selectedCourse !== "all" || minFailedSubjects !== "") && (
                   <div className="mt-4 p-3 bg-blue-50 rounded-lg border border-blue-200">
                     <p className="text-sm text-blue-700">
                       <strong>Filtros activos:</strong>
                       {searchStudent && ` Estudiante: "${searchStudent}"`}
                       {searchSubject && ` Materia: "${searchSubject}"`}
                       {selectedCourse !== "all" && ` | Curso: ${selectedCourse}`}
+                      {selectedGradeTypes.length > 1
+                        ? ` | Tipos de Calificación: Múltiples`
+                        : selectedGradeTypes.length === 1
+                          ? ` | Tipo de Calificación: ${getGradeTypeLabel(selectedGradeTypes[0])}`
+                          : ""}
+                      {minFailedSubjects !== "" &&
+                        ` | Mín. desaprobadas: ${minFailedSubjects} (${getGradeTypeLabel(minFailedGradeType)})`}
                       {` | Mostrando: ${filteredStudents.length} estudiantes, ${filteredData.length} materias`}
                     </p>
                   </div>
@@ -1024,14 +1231,20 @@ export default function StudentGradesApp() {
                             <div>
                               <CardTitle className="text-green-800">{subject.subject}</CardTitle>
                               <CardDescription>
-                                Curso: {subject.course} | {getGradeTypeLabel(selectedGradeType)}
+                                Curso: {subject.course} |{" "}
+                                {selectedGradeTypes.length > 1
+                                  ? "Múltiples Calificaciones"
+                                  : selectedGradeTypes.length === 1
+                                    ? getGradeTypeLabel(selectedGradeTypes[0])
+                                    : "Sin Calificación Seleccionada"}
                               </CardDescription>
                             </div>
                             <Badge className="bg-green-600">
                               {
                                 subject.students.filter(
                                   (student) =>
-                                    !searchStudent || student.name.toLowerCase().includes(searchStudent.toLowerCase()),
+                                    !searchStudent ||
+                                    normalizeString(student.name).includes(normalizeString(searchStudent)),
                                 ).length
                               }{" "}
                               estudiantes
@@ -1043,48 +1256,60 @@ export default function StudentGradesApp() {
                             <TableHeader>
                               <TableRow>
                                 <TableHead>Estudiante</TableHead>
-                                <TableHead className="text-center">{getGradeTypeLabel(selectedGradeType)}</TableHead>
-                                <TableHead className="text-center">Estado</TableHead>
+                                {selectedGradeTypes.map((type) => (
+                                  <React.Fragment key={type}>
+                                    <TableHead className="text-center">{getGradeTypeLabel(type)}</TableHead>
+                                    <TableHead className="text-center">Estado</TableHead>
+                                  </React.Fragment>
+                                ))}
                               </TableRow>
                             </TableHeader>
                             <TableBody>
                               {subject.students
                                 .filter(
                                   (student) =>
-                                    !searchStudent || student.name.toLowerCase().includes(searchStudent.toLowerCase()),
+                                    !searchStudent ||
+                                    normalizeString(student.name).includes(normalizeString(searchStudent)),
                                 )
-                                .map((student, studentIndex) => {
-                                  const grade = getGradeValue(student, selectedGradeType)
-                                  const gradeStr = grade.toString().trim()
-                                  const numericGrade = Number.parseFloat(gradeStr)
-                                  const isTea = gradeStr.toUpperCase() === "TEA"
-                                  const isPassed =
-                                    (!isNaN(numericGrade) && numericGrade >= 7) ||
-                                    (isTea &&
-                                      (selectedGradeType === "preliminar1" || selectedGradeType === "preliminar2"))
+                                .map((student, studentIndex) => (
+                                  <TableRow key={studentIndex}>
+                                    <TableCell className="font-medium">{student.name}</TableCell>
+                                    {selectedGradeTypes.map((type) => {
+                                      const grade = getGradeValue(student, type)
+                                      const gradeStr = grade.toString().trim()
+                                      const numericGrade = Number.parseFloat(gradeStr)
+                                      const isTea = gradeStr.toUpperCase() === "TEA"
+                                      const isPassed =
+                                        (!isNaN(numericGrade) && numericGrade >= 7) ||
+                                        (isTea && (type === "preliminar1" || type === "preliminar2"))
+                                      const isFailed =
+                                        gradeStr.toUpperCase() === "TEP" ||
+                                        gradeStr.toUpperCase() === "TED" ||
+                                        (!isNaN(numericGrade) && numericGrade < 7 && numericGrade > 0)
 
-                                  return (
-                                    <TableRow key={studentIndex}>
-                                      <TableCell className="font-medium">{student.name}</TableCell>
-                                      <TableCell className="text-center">
-                                        <Badge
-                                          variant={isPassed ? "default" : "destructive"}
-                                          className={isPassed ? "bg-green-600" : ""}
-                                        >
-                                          {grade || "N/A"}
-                                        </Badge>
-                                      </TableCell>
-                                      <TableCell className="text-center">
-                                        <Badge
-                                          variant={isPassed ? "default" : "destructive"}
-                                          className={isPassed ? "bg-green-100 text-green-800" : ""}
-                                        >
-                                          {isPassed ? "Aprobado" : "Desaprobado"}
-                                        </Badge>
-                                      </TableCell>
-                                    </TableRow>
-                                  )
-                                })}
+                                      return (
+                                        <React.Fragment key={type}>
+                                          <TableCell className="text-center">
+                                            <Badge
+                                              variant={isPassed ? "default" : isFailed ? "destructive" : "secondary"}
+                                              className={isPassed ? "bg-green-600" : ""}
+                                            >
+                                              {grade || "N/A"}
+                                            </Badge>
+                                          </TableCell>
+                                          <TableCell className="text-center">
+                                            <Badge
+                                              variant={isPassed ? "default" : isFailed ? "destructive" : "secondary"}
+                                              className={isPassed ? "bg-green-100 text-green-800" : ""}
+                                            >
+                                              {isPassed ? "Aprobado" : isFailed ? "Desaprobado" : "N/A"}
+                                            </Badge>
+                                          </TableCell>
+                                        </React.Fragment>
+                                      )
+                                    })}
+                                  </TableRow>
+                                ))}
                             </TableBody>
                           </Table>
                         </CardContent>
@@ -1106,9 +1331,9 @@ export default function StudentGradesApp() {
                     </Card>
                   ) : (
                     filteredStudents.map((studentName, index) => {
-                      const studentSubjects = getStudentSubjects(studentName)
+                      // For individual student cards, we want to show stats based on the current searchSubject filter
+                      const studentSubjects = getStudentSubjectsFiltered(studentName, false)
 
-                      // Función para calcular estadísticas por tipo de calificación
                       const calculateStatsForGradeType = (gradeType: keyof StudentGrade) => {
                         let totalSubjects = 0
                         let passedSubjects = 0
@@ -1117,11 +1342,11 @@ export default function StudentGradesApp() {
                         let gradeSum = 0
 
                         studentSubjects.forEach((item) => {
+                          // Do NOT exclude subjects here, as we need all data for overall stats
                           if (item.studentData) {
                             const gradeStr = item.studentData[gradeType].toString().trim().toUpperCase()
                             const grade = Number.parseFloat(gradeStr)
 
-                            // Para valoraciones preliminares
                             if (gradeType === "preliminar1" || gradeType === "preliminar2") {
                               if (gradeStr === "TEA") {
                                 totalSubjects++
@@ -1140,7 +1365,6 @@ export default function StudentGradesApp() {
                                 }
                               }
                             } else {
-                              // Para cuatrimestres y final, solo números
                               if (!isNaN(grade) && grade > 0) {
                                 totalSubjects++
                                 totalGrades++
@@ -1163,7 +1387,6 @@ export default function StudentGradesApp() {
                         }
                       }
 
-                      // Calcular estadísticas para cada tipo de calificación
                       const preliminar1Stats = calculateStatsForGradeType("preliminar1")
                       const cuatrimestre1Stats = calculateStatsForGradeType("cuatrimestre1")
                       const preliminar2Stats = calculateStatsForGradeType("preliminar2")
@@ -1196,9 +1419,10 @@ export default function StudentGradesApp() {
                             {/* Tabla detallada de materias */}
                             <div className="mb-6">
                               <h4 className="text-lg font-semibold text-green-800 mb-3">
-                                Calificaciones ({studentSubjects.length} materias)
+                                Calificaciones (
+                                {studentSubjects.filter((item) => !isExcludedSubject(item.subject)).length} materias)
                               </h4>
-                              {studentSubjects.length > 0 ? (
+                              {studentSubjects.filter((item) => !isExcludedSubject(item.subject)).length > 0 ? (
                                 <Table>
                                   <TableHeader>
                                     <TableRow>
@@ -1212,101 +1436,103 @@ export default function StudentGradesApp() {
                                     </TableRow>
                                   </TableHeader>
                                   <TableBody>
-                                    {studentSubjects.map((item, subjectIndex) => {
-                                      const student = item.studentData!
-                                      return (
-                                        <TableRow key={subjectIndex}>
-                                          <TableCell className="font-medium">{item.subject}</TableCell>
-                                          <TableCell>{item.course}</TableCell>
-                                          <TableCell className="text-center">
-                                            {(() => {
-                                              const gradeStr = student.preliminar1.toString().trim().toUpperCase()
-                                              const grade = Number.parseFloat(gradeStr)
-                                              const isPassed = gradeStr === "TEA" || (!isNaN(grade) && grade >= 7)
-                                              const isFailed =
-                                                gradeStr === "TEP" ||
-                                                gradeStr === "TED" ||
-                                                (!isNaN(grade) && grade < 7 && grade > 0)
+                                    {studentSubjects
+                                      .filter((item) => !isExcludedSubject(item.subject)) // Filter for display
+                                      .map((item, subjectIndex) => {
+                                        const student = item.studentData!
+                                        return (
+                                          <TableRow key={subjectIndex}>
+                                            <TableCell className="font-medium">{item.subject}</TableCell>
+                                            <TableCell>{item.course}</TableCell>
+                                            <TableCell className="text-center">
+                                              {(() => {
+                                                const gradeStr = student.preliminar1.toString().trim().toUpperCase()
+                                                const grade = Number.parseFloat(gradeStr)
+                                                const isPassed = gradeStr === "TEA" || (!isNaN(grade) && grade >= 7)
+                                                const isFailed =
+                                                  gradeStr === "TEP" ||
+                                                  gradeStr === "TED" ||
+                                                  (!isNaN(grade) && grade < 7 && grade > 0)
 
-                                              return (
-                                                <Badge
-                                                  variant={
-                                                    isPassed ? "default" : isFailed ? "destructive" : "secondary"
-                                                  }
-                                                  className={isPassed ? "bg-green-600" : ""}
-                                                >
-                                                  {student.preliminar1 || "N/A"}
-                                                </Badge>
-                                              )
-                                            })()}
-                                          </TableCell>
-                                          <TableCell className="text-center">
-                                            {(() => {
-                                              const grade = Number.parseFloat(student.cuatrimestre1.toString())
-                                              const isPassed = !isNaN(grade) && grade >= 7
-                                              return (
-                                                <Badge
-                                                  variant={isPassed ? "default" : "destructive"}
-                                                  className={isPassed ? "bg-green-600" : ""}
-                                                >
-                                                  {student.cuatrimestre1 || "N/A"}
-                                                </Badge>
-                                              )
-                                            })()}
-                                          </TableCell>
-                                          <TableCell className="text-center">
-                                            {(() => {
-                                              const gradeStr = student.preliminar2.toString().trim().toUpperCase()
-                                              const grade = Number.parseFloat(gradeStr)
-                                              const isPassed = gradeStr === "TEA" || (!isNaN(grade) && grade >= 7)
-                                              const isFailed =
-                                                gradeStr === "TEP" ||
-                                                gradeStr === "TED" ||
-                                                (!isNaN(grade) && grade < 7 && grade > 0)
+                                                return (
+                                                  <Badge
+                                                    variant={
+                                                      isPassed ? "default" : isFailed ? "destructive" : "secondary"
+                                                    }
+                                                    className={isPassed ? "bg-green-600" : ""}
+                                                  >
+                                                    {student.preliminar1 || "N/A"}
+                                                  </Badge>
+                                                )
+                                              })()}
+                                            </TableCell>
+                                            <TableCell className="text-center">
+                                              {(() => {
+                                                const grade = Number.parseFloat(student.cuatrimestre1.toString())
+                                                const isPassed = !isNaN(grade) && grade >= 7
+                                                return (
+                                                  <Badge
+                                                    variant={isPassed ? "default" : "destructive"}
+                                                    className={isPassed ? "bg-green-600" : ""}
+                                                  >
+                                                    {student.cuatrimestre1 || "N/A"}
+                                                  </Badge>
+                                                )
+                                              })()}
+                                            </TableCell>
+                                            <TableCell className="text-center">
+                                              {(() => {
+                                                const gradeStr = student.preliminar2.toString().trim().toUpperCase()
+                                                const grade = Number.parseFloat(gradeStr)
+                                                const isPassed = gradeStr === "TEA" || (!isNaN(grade) && grade >= 7)
+                                                const isFailed =
+                                                  gradeStr === "TEP" ||
+                                                  gradeStr === "TED" ||
+                                                  (!isNaN(grade) && grade < 7 && grade > 0)
 
-                                              return (
-                                                <Badge
-                                                  variant={
-                                                    isPassed ? "default" : isFailed ? "destructive" : "secondary"
-                                                  }
-                                                  className={isPassed ? "bg-green-600" : ""}
-                                                >
-                                                  {student.preliminar2 || "N/A"}
-                                                </Badge>
-                                              )
-                                            })()}
-                                          </TableCell>
-                                          <TableCell className="text-center">
-                                            {(() => {
-                                              const grade = Number.parseFloat(student.cuatrimestre2.toString())
-                                              const isPassed = !isNaN(grade) && grade >= 7
-                                              return (
-                                                <Badge
-                                                  variant={isPassed ? "default" : "destructive"}
-                                                  className={isPassed ? "bg-green-600" : ""}
-                                                >
-                                                  {student.cuatrimestre2 || "N/A"}
-                                                </Badge>
-                                              )
-                                            })()}
-                                          </TableCell>
-                                          <TableCell className="text-center">
-                                            {(() => {
-                                              const grade = Number.parseFloat(student.final.toString())
-                                              const isPassed = !isNaN(grade) && grade >= 7
-                                              return (
-                                                <Badge
-                                                  variant={isPassed ? "default" : "destructive"}
-                                                  className={isPassed ? "bg-green-600" : ""}
-                                                >
-                                                  {student.final || "N/A"}
-                                                </Badge>
-                                              )
-                                            })()}
-                                          </TableCell>
-                                        </TableRow>
-                                      )
-                                    })}
+                                                return (
+                                                  <Badge
+                                                    variant={
+                                                      isPassed ? "default" : isFailed ? "destructive" : "secondary"
+                                                    }
+                                                    className={isPassed ? "bg-green-600" : ""}
+                                                  >
+                                                    {student.preliminar2 || "N/A"}
+                                                  </Badge>
+                                                )
+                                              })()}
+                                            </TableCell>
+                                            <TableCell className="text-center">
+                                              {(() => {
+                                                const grade = Number.parseFloat(student.cuatrimestre2.toString())
+                                                const isPassed = !isNaN(grade) && grade >= 7
+                                                return (
+                                                  <Badge
+                                                    variant={isPassed ? "default" : "destructive"}
+                                                    className={isPassed ? "bg-green-600" : ""}
+                                                  >
+                                                    {student.cuatrimestre2 || "N/A"}
+                                                  </Badge>
+                                                )
+                                              })()}
+                                            </TableCell>
+                                            <TableCell className="text-center">
+                                              {(() => {
+                                                const grade = Number.parseFloat(student.final.toString())
+                                                const isPassed = !isNaN(grade) && grade >= 7
+                                                return (
+                                                  <Badge
+                                                    variant={isPassed ? "default" : "destructive"}
+                                                    className={isPassed ? "bg-green-600" : ""}
+                                                  >
+                                                    {student.final || "N/A"}
+                                                  </Badge>
+                                                )
+                                              })()}
+                                            </TableCell>
+                                          </TableRow>
+                                        )
+                                      })}
                                   </TableBody>
                                 </Table>
                               ) : (
@@ -1507,7 +1733,8 @@ export default function StudentGradesApp() {
                       <CardTitle className="text-green-800">Estadísticas Generales</CardTitle>
                       <CardDescription>
                         Resumen de todas las materias y estudiantes
-                        {(searchStudent || searchSubject || selectedCourse !== "all") && " (filtrado)"}
+                        {(searchStudent || searchSubject || selectedCourse !== "all" || minFailedSubjects !== "") &&
+                          " (filtrado)"}
                       </CardDescription>
                     </CardHeader>
                     <CardContent>
@@ -1515,19 +1742,25 @@ export default function StudentGradesApp() {
                         <div className="text-center">
                           <div className="text-3xl font-bold text-green-600">{filteredData.length}</div>
                           <div className="text-sm text-gray-600">
-                            Materias {(searchStudent || searchSubject || selectedCourse !== "all") && "Filtradas"}
+                            Materias{" "}
+                            {(searchStudent || searchSubject || selectedCourse !== "all" || minFailedSubjects !== "") &&
+                              "Filtradas"}
                           </div>
                         </div>
                         <div className="text-center">
                           <div className="text-3xl font-bold text-blue-600">{filteredStudents.length}</div>
                           <div className="text-sm text-gray-600">
-                            Estudiantes {(searchStudent || searchSubject || selectedCourse !== "all") && "Filtrados"}
+                            Estudiantes{" "}
+                            {(searchStudent || searchSubject || selectedCourse !== "all" || minFailedSubjects !== "") &&
+                              "Filtrados"}
                           </div>
                         </div>
                         <div className="text-center">
                           <div className="text-3xl font-bold text-purple-600">{filteredCourses.length}</div>
                           <div className="text-sm text-gray-600">
-                            Cursos {(searchStudent || searchSubject || selectedCourse !== "all") && "Filtrados"}
+                            Cursos{" "}
+                            {(searchStudent || searchSubject || selectedCourse !== "all" || minFailedSubjects !== "") &&
+                              "Filtrados"}
                           </div>
                         </div>
                         <div className="text-center">
@@ -1537,7 +1770,8 @@ export default function StudentGradesApp() {
                               filteredData.forEach((subject) => {
                                 const studentsInSubject = subject.students.filter(
                                   (student) =>
-                                    !searchStudent || student.name.toLowerCase().includes(searchStudent.toLowerCase()),
+                                    !searchStudent ||
+                                    normalizeString(student.name).includes(normalizeString(searchStudent)),
                                 )
                                 totalRecords += studentsInSubject.length
                               })
@@ -1545,10 +1779,85 @@ export default function StudentGradesApp() {
                             })()}
                           </div>
                           <div className="text-sm text-gray-600">
-                            Registros {(searchStudent || searchSubject || selectedCourse !== "all") && "Filtrados"}
+                            Registros{" "}
+                            {(searchStudent || searchSubject || selectedCourse !== "all" || minFailedSubjects !== "") &&
+                              "Filtrados"}
                           </div>
                         </div>
                       </div>
+                    </CardContent>
+                  </Card>
+
+                  {/* Sección de Alumnos con X Materias Desaprobadas */}
+                  <Card className="border-red-200">
+                    <CardHeader className="bg-red-50">
+                      <div className="flex justify-between items-center">
+                        <div>
+                          <CardTitle className="text-red-800">Alumnos con Materias Desaprobadas</CardTitle>
+                          <CardDescription className="text-red-700">
+                            Lista de estudiantes con {minFailedSubjects || "0"} o más materias desaprobadas (
+                            {getGradeTypeLabel(minFailedGradeType)})
+                            {selectedCourse !== "all" && " (filtrado por curso)"}
+                          </CardDescription>
+                        </div>
+                        <Button
+                          onClick={exportStudentsWithFailedSubjects}
+                          variant="outline"
+                          size="sm"
+                          className="border-red-300 text-red-700 hover:bg-red-100 bg-transparent"
+                          disabled={
+                            filteredStudents.length === 0 ||
+                            minFailedSubjects === "" ||
+                            isNaN(Number(minFailedSubjects))
+                          }
+                        >
+                          <Download className="h-4 w-4 mr-2" />
+                          Exportar Lista
+                        </Button>
+                      </div>
+                    </CardHeader>
+                    <CardContent className="pt-6">
+                      {filteredStudents.length === 0 ? (
+                        <div className="text-center py-4 text-gray-500">
+                          <p>No se encontraron estudiantes que coincidan con los filtros aplicados.</p>
+                        </div>
+                      ) : (
+                        <div className="space-y-3 max-h-96 overflow-y-auto">
+                          {filteredStudents.map((studentName, studentIndex) => {
+                            // For this section, we need to calculate stats based on the selected minFailedGradeType
+                            // and ignore the searchSubject filter.
+                            const studentSubjects = getStudentSubjectsFiltered(studentName, true)
+                            const stats = getStudentOverallStatistics(
+                              studentSubjects,
+                              minFailedGradeType as keyof StudentGrade,
+                            )
+
+                            // The filtering for minFailedSubjects is already done in getFilteredStudents
+                            // This map only renders the students that passed that filter.
+                            return (
+                              <div
+                                key={studentIndex}
+                                className="flex items-center justify-between p-4 bg-white rounded-lg border border-red-200"
+                              >
+                                <div className="flex-1">
+                                  <h4 className="font-medium text-gray-900">{studentName}</h4>
+                                  <p className="text-sm text-gray-600">
+                                    Materias desaprobadas ({getGradeTypeLabel(minFailedGradeType)}):{" "}
+                                    <span className="font-bold text-red-600">{stats.failedSubjects}</span> de{" "}
+                                    {stats.totalSubjects}
+                                  </p>
+                                </div>
+                                <div className="text-center min-w-[80px]">
+                                  <div className="text-lg font-bold text-purple-600">
+                                    {stats.averageGrade.toFixed(1)}
+                                  </div>
+                                  <div className="text-xs text-gray-600">Promedio Final</div>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      )}
                     </CardContent>
                   </Card>
 
@@ -1558,7 +1867,8 @@ export default function StudentGradesApp() {
                       <CardTitle className="text-green-800">Resumen por Tipo de Evaluación</CardTitle>
                       <CardDescription>
                         Estadísticas globales de aprobación por cada tipo de calificación
-                        {(searchStudent || searchSubject || selectedCourse !== "all") && " (filtrado)"}
+                        {(searchStudent || searchSubject || selectedCourse !== "all" || minFailedSubjects !== "") &&
+                          " (filtrado)"}
                         <br />
                         <span className="text-xs text-gray-500">
                           Haz clic en una tarjeta para ver el detalle por materia
@@ -1579,39 +1889,42 @@ export default function StudentGradesApp() {
                           let failedEvaluations = 0
                           let teaCount = 0
 
+                          // Use filteredData which already excludes the specified subjects
                           filteredData.forEach((subject) => {
                             subject.students.forEach((student) => {
-                              if (!searchStudent || student.name.toLowerCase().includes(searchStudent.toLowerCase())) {
-                                const gradeStr = student[gradeType.key as keyof StudentGrade]
-                                  .toString()
-                                  .trim()
-                                  .toUpperCase()
-                                const grade = Number.parseFloat(gradeStr)
+                              // Only consider students that pass the current filters
+                              const studentPassesFilters = filteredStudents.includes(student.name)
+                              if (!studentPassesFilters) return
 
-                                if (gradeType.key === "preliminar1" || gradeType.key === "preliminar2") {
-                                  if (gradeStr === "TEA") {
-                                    totalEvaluations++
+                              const gradeStr = student[gradeType.key as keyof StudentGrade]
+                                .toString()
+                                .trim()
+                                .toUpperCase()
+                              const grade = Number.parseFloat(gradeStr)
+
+                              if (gradeType.key === "preliminar1" || gradeType.key === "preliminar2") {
+                                if (gradeStr === "TEA") {
+                                  totalEvaluations++
+                                  passedEvaluations++
+                                  teaCount++
+                                } else if (gradeStr === "TEP" || gradeStr === "TED") {
+                                  totalEvaluations++
+                                  failedEvaluations++
+                                } else if (!isNaN(grade) && grade > 0) {
+                                  totalEvaluations++
+                                  if (grade >= 7) {
                                     passedEvaluations++
-                                    teaCount++
-                                  } else if (gradeStr === "TEP" || gradeStr === "TED") {
-                                    totalEvaluations++
+                                  } else {
                                     failedEvaluations++
-                                  } else if (!isNaN(grade) && grade > 0) {
-                                    totalEvaluations++
-                                    if (grade >= 7) {
-                                      passedEvaluations++
-                                    } else {
-                                      failedEvaluations++
-                                    }
                                   }
-                                } else {
-                                  if (!isNaN(grade) && grade > 0) {
-                                    totalEvaluations++
-                                    if (grade >= 7) {
-                                      passedEvaluations++
-                                    } else {
-                                      failedEvaluations++
-                                    }
+                                }
+                              } else {
+                                if (!isNaN(grade) && grade > 0) {
+                                  totalEvaluations++
+                                  if (grade >= 7) {
+                                    passedEvaluations++
+                                  } else {
+                                    failedEvaluations++
                                   }
                                 }
                               }
@@ -1682,40 +1995,40 @@ export default function StudentGradesApp() {
                     <Card className="border-blue-200 bg-blue-50">
                       <CardHeader className="bg-blue-100">
                         <div className="flex justify-between items-center">
-                          {" "}
-                          {/* Added flex container */}
                           <div>
                             <CardTitle className="text-blue-800">
                               Detalle por Materia -{" "}
-                              {
-                                [
-                                  { key: "preliminar1", label: "1º Valoración Preliminar" },
-                                  { key: "cuatrimestre1", label: "1º Cuatrimestre" },
-                                  { key: "preliminar2", label: "2º Valoración Preliminar" },
-                                  { key: "cuatrimestre2", label: "2º Cuatrimestre" },
-                                  { key: "final", label: "Calificación Final" },
-                                ].find((type) => type.key === expandedEvaluationType)?.label
-                              }
+                              {gradeTypeOptions.find((type) => type.value === expandedEvaluationType)?.label}
                             </CardTitle>
                             <CardDescription className="text-blue-700">
                               Estadísticas detalladas por cada materia para este tipo de evaluación
                             </CardDescription>
                           </div>
-                          <Button
-                            onClick={() => exportSubjectDetails(expandedEvaluationType)}
-                            variant="outline"
-                            size="sm"
-                            className="border-blue-300 text-blue-700 hover:bg-blue-100 bg-transparent"
-                          >
-                            <Download className="h-4 w-4 mr-2" />
-                            Exportar Detalle
-                          </Button>
+                          <div className="flex space-x-2">
+                            <Button
+                              onClick={() => exportSubjectDetails(expandedEvaluationType)}
+                              variant="outline"
+                              size="sm"
+                              className="border-blue-300 text-blue-700 hover:bg-blue-100 bg-transparent"
+                            >
+                              <Download className="h-4 w-4 mr-2" />
+                              Exportar Detalle
+                            </Button>
+                            <Button
+                              onClick={() => exportSubjectMatrix(expandedEvaluationType)}
+                              variant="outline"
+                              size="sm"
+                              className="border-green-300 text-green-700 hover:bg-green-100 bg-transparent"
+                            >
+                              <Download className="h-4 w-4 mr-2" />
+                              Exportar Materias
+                            </Button>
+                          </div>
                         </div>
                       </CardHeader>
                       <CardContent className="pt-6">
                         <div className="space-y-3">
                           {(() => {
-                            // Calcular estadísticas por materia para el tipo de evaluación seleccionado
                             const subjectStats = new Map<
                               string,
                               {
@@ -1729,50 +2042,50 @@ export default function StudentGradesApp() {
                               }
                             >()
 
+                            // Use filteredData which already excludes the specified subjects
                             filteredData.forEach((subject) => {
                               let subjectTotal = 0
                               let subjectPassed = 0
                               let subjectFailed = 0
-                              let subjectTea = 0
+                              let teaCount = 0
 
                               subject.students.forEach((student) => {
-                                if (
-                                  !searchStudent ||
-                                  student.name.toLowerCase().includes(searchStudent.toLowerCase())
-                                ) {
-                                  const gradeStr = student[expandedEvaluationType as keyof StudentGrade]
-                                    .toString()
-                                    .trim()
-                                    .toUpperCase()
-                                  const grade = Number.parseFloat(gradeStr)
+                                // Only consider students that pass the current filters
+                                const studentPassesFilters = filteredStudents.includes(student.name)
+                                if (!studentPassesFilters) return
 
-                                  if (
-                                    expandedEvaluationType === "preliminar1" ||
-                                    expandedEvaluationType === "preliminar2"
-                                  ) {
-                                    if (gradeStr === "TEA") {
-                                      subjectTotal++
+                                const gradeStr = student[expandedEvaluationType as keyof StudentGrade]
+                                  .toString()
+                                  .trim()
+                                  .toUpperCase()
+                                const grade = Number.parseFloat(gradeStr)
+
+                                if (
+                                  expandedEvaluationType === "preliminar1" ||
+                                  expandedEvaluationType === "preliminar2"
+                                ) {
+                                  if (gradeStr === "TEA") {
+                                    subjectTotal++
+                                    subjectPassed++
+                                    teaCount++
+                                  } else if (gradeStr === "TEP" || gradeStr === "TED") {
+                                    subjectTotal++
+                                    subjectFailed++
+                                  } else if (!isNaN(grade) && grade > 0) {
+                                    subjectTotal++
+                                    if (grade >= 7) {
                                       subjectPassed++
-                                      subjectTea++
-                                    } else if (gradeStr === "TEP" || gradeStr === "TED") {
-                                      subjectTotal++
+                                    } else {
                                       subjectFailed++
-                                    } else if (!isNaN(grade) && grade > 0) {
-                                      subjectTotal++
-                                      if (grade >= 7) {
-                                        subjectPassed++
-                                      } else {
-                                        subjectFailed++
-                                      }
                                     }
-                                  } else {
-                                    if (!isNaN(grade) && grade > 0) {
-                                      subjectTotal++
-                                      if (grade >= 7) {
-                                        subjectPassed++
-                                      } else {
-                                        subjectFailed++
-                                      }
+                                  }
+                                } else {
+                                  if (!isNaN(grade) && grade > 0) {
+                                    subjectTotal++
+                                    if (grade >= 7) {
+                                      subjectPassed++
+                                    } else {
+                                      subjectFailed++
                                     }
                                   }
                                 }
@@ -1785,7 +2098,7 @@ export default function StudentGradesApp() {
                                   total: subjectTotal,
                                   passed: subjectPassed,
                                   failed: subjectFailed,
-                                  teaCount: subjectTea,
+                                  teaCount: teaCount,
                                   approvalRate: (subjectPassed / subjectTotal) * 100,
                                 })
                               }
@@ -1809,9 +2122,6 @@ export default function StudentGradesApp() {
                                     <div className="text-center">
                                       <div className="text-lg font-bold text-green-600">{stat.passed}</div>
                                       <div className="text-xs text-gray-600">Aprobados</div>
-                                      {stat.teaCount > 0 && (
-                                        <div className="text-xs text-green-500">({stat.teaCount} TEA)</div>
-                                      )}
                                     </div>
                                     <div className="text-center">
                                       <div className="text-lg font-bold text-red-600">{stat.failed}</div>
@@ -1835,50 +2145,72 @@ export default function StudentGradesApp() {
                   {/* Estadísticas por Curso */}
                   {getGroupedCourses()
                     .filter((group) => {
-                      if (searchStudent || searchSubject) {
-                        return group.subjects.some((file) =>
-                          file.students.some((student) =>
-                            student.name.toLowerCase().includes(searchStudent.toLowerCase()),
-                          ),
+                      // Filter courses based on whether they contain any subjects/students matching the filters
+                      return group.subjects.some((file) => {
+                        // Check if any student in this subject passes the global student filters
+                        const hasMatchingStudent = file.students.some((student) =>
+                          filteredStudents.includes(student.name),
                         )
-                      }
-                      return true
+                        if (!hasMatchingStudent) return false
+
+                        // If minFailedFilter is active, ignore searchSubject for this check
+                        if (
+                          searchSubject &&
+                          !isMinFailedFilterActive &&
+                          !normalizeString(file.subject).includes(normalizeString(searchSubject))
+                        ) {
+                          return false
+                        }
+                        // Also exclude the specific subjects from the course statistics display
+                        if (isExcludedSubject(file.subject)) {
+                          return false
+                        }
+                        return true
+                      })
                     })
                     .map((courseGroup, index) => {
                       const courseSubjects = courseGroup.subjects.filter((subject) => {
-                        // Aplicar filtros adicionales si es necesario
-                        if (selectedCourse !== "all" && courseGroup.normalizedName !== selectedCourse) {
+                        // Filter subjects within the course group based on global filters
+                        const hasMatchingStudent = subject.students.some((student) =>
+                          filteredStudents.includes(student.name),
+                        )
+                        if (!hasMatchingStudent) return false
+
+                        // If minFailedFilter is active, ignore searchSubject for this check
+                        if (
+                          searchSubject &&
+                          !isMinFailedFilterActive &&
+                          !normalizeString(subject.subject).includes(normalizeString(searchSubject))
+                        ) {
                           return false
                         }
-                        if (searchStudent || searchSubject) {
-                          return (
-                            subject.students.some((student) =>
-                              student.name.toLowerCase().includes(searchStudent.toLowerCase()),
-                            ) || subject.subject.toLowerCase().includes(searchSubject.toLowerCase())
-                          )
+                        // Also exclude the specific subjects from the course statistics display
+                        if (isExcludedSubject(subject.subject)) {
+                          return false
                         }
                         return true
                       })
 
-                      // Calcular estudiantes únicos en este curso agrupado
-                      const uniqueStudentsInCourse = new Set()
+                      // Calculate unique students in this filtered course group
+                      const uniqueStudentsInCourse = new Set<string>()
                       courseSubjects.forEach((subject) => {
                         subject.students.forEach((student) => {
-                          if (!searchStudent || student.name.toLowerCase().includes(searchStudent.toLowerCase())) {
-                            uniqueStudentsInCourse.add(student.name.toLowerCase().trim())
+                          if (filteredStudents.includes(student.name)) {
+                            // Only count students that pass global filters
+                            uniqueStudentsInCourse.add(normalizeString(student.name))
                           }
                         })
                       })
                       const totalStudents = uniqueStudentsInCourse.size
 
-                      // Calcular estadísticas generales del curso
                       let totalFinalGrades = 0
                       let passedFinalGrades = 0
                       let failedFinalGrades = 0
 
                       courseSubjects.forEach((subject) => {
                         subject.students.forEach((student) => {
-                          if (!searchStudent || student.name.toLowerCase().includes(searchStudent.toLowerCase())) {
+                          if (filteredStudents.includes(student.name)) {
+                            // Only count grades for students that pass global filters
                             const finalGradeStr = student.final.toString().trim()
                             const finalGrade = Number.parseFloat(finalGradeStr)
 
@@ -1907,7 +2239,11 @@ export default function StudentGradesApp() {
                                       Incluye: {Array.from(courseGroup.originalNames).join(", ")}
                                     </div>
                                   )}
-                                  {(searchStudent || searchSubject || selectedCourse !== "all") && " (filtrado)"}
+                                  {(searchStudent ||
+                                    searchSubject ||
+                                    selectedCourse !== "all" ||
+                                    minFailedSubjects !== "") &&
+                                    " (filtrado)"}
                                 </CardDescription>
                               </div>
                               <div className="text-right">
@@ -1929,11 +2265,9 @@ export default function StudentGradesApp() {
                             <div className="space-y-3">
                               {courseSubjects.map((subject, subjectIndex) => {
                                 const filteredStudentsInSubject = subject.students.filter(
-                                  (student) =>
-                                    !searchStudent || student.name.toLowerCase().includes(searchStudent.toLowerCase()),
+                                  (student) => filteredStudents.includes(student.name), // Only count students that pass global filters
                                 )
 
-                                // Calcular estadísticas de la materia
                                 let passedCount = 0
                                 let failedCount = 0
                                 let totalWithGrades = 0
